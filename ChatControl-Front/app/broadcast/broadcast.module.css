@@ -1,0 +1,221 @@
+/* Estilos específicos de Mensajes Masivos; layout compartido con chat.module.css */
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 15px;
+  margin: 0 0.5rem;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  width: calc(100% - 1rem);
+  box-sizing: border-box;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+}
+
+.checkboxRow:hover {
+  background: var(--surface-hover);
+}
+
+.checkboxRowSelected {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.08);
+}
+
+/* Checkbox redondo (integrado con la app) */
+.checkbox {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.checkbox:hover {
+  border-color: var(--text-muted);
+}
+
+.checkbox:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
+  background-size: 14px 14px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.contactStatus {
+  font-size: 0.75rem;
+  margin-top: 0.1rem;
+}
+
+.contactStatusOk {
+  color: var(--success);
+}
+
+.contactStatusBlocked {
+  color: var(--warning);
+}
+
+.broadcastMain {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 1.25rem;
+}
+
+.typeSection {
+  margin-bottom: 1.5rem;
+}
+
+.typeSection h3 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: var(--text-muted);
+}
+
+.typeButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.typeBtn {
+  padding: 0.6rem 1rem;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 15px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.typeBtn:hover:not(:disabled) {
+  background: var(--border);
+}
+
+.typeBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.typeBtnActive {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.12);
+  color: var(--accent);
+}
+
+.contentSection {
+  margin-bottom: 1.5rem;
+}
+
+.contentSection label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+/* Inputs más grandes horizontalmente (ocupan el ancho disponible del área principal) */
+.broadcastInputWide {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.templateSelect {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.templateVars {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.templateVars input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  color: var(--text);
+  font-size: 0.9rem;
+  box-sizing: border-box;
+}
+
+/* Textarea ancho + barra de desplazamiento integrada con la app */
+.broadcastTextarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.broadcastTextarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+.broadcastTextarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.broadcastTextarea::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.broadcastTextarea::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.progressBar {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  background: var(--surface-hover);
+  border-radius: 15px;
+  font-size: 0.9rem;
+}
+
+.progressBar strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.progressErrors {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--danger);
+}
+
+.sendConfirm {
+  margin-top: 1rem;
+}
+
+.sendConfirm p {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}

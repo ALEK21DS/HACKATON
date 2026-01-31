@@ -1,0 +1,115 @@
+// ChatControl MVP - PostgreSQL (Supabase) + Prisma
+// Diseñado para escalar a multi-empresa sin migraciones destructivas
+// (futuro: agregar companyId en Contact/Conversation)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum MessageDirection {
+  IN   // Mensaje entrante (del contacto)
+  OUT  // Mensaje saliente (de la app)
+}
+
+enum MessageType {
+  TEXT     // Mensaje de texto libre (ventana 24h)
+  TEMPLATE // Plantilla (fuera de ventana 24h - futuro)
+  IMAGE    // Imagen (URL en mediaUrl, caption opcional en body)
+  VIDEO    // Video (URL en mediaUrl, caption opcional en body)
+  AUDIO    // Audio (URL en mediaUrl)
+  DOCUMENT // Documento (URL en mediaUrl, fileName opcional)
+}
+
+enum MessageStatus {
+  RECEIVED  // Mensaje entrante recibido
+  SENT      // Enviado a WhatsApp
+  DELIVERED // Entregado al dispositivo
+  READ      // Leído por el destinatario
+  FAILED    // Fallo en envío/entrega
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+/// Contact: número de WhatsApp externo (cliente).
+/// Un contacto puede tener múltiples conversaciones a lo largo del tiempo.
+/// Futuro: agregar companyId para multi-tenant sin romper esquema.
+model Contact {
+  id        String   @id @default(cuid())
+  phone     String   @unique // Número normalizado, ej: 5491112345678
+  createdAt DateTime @default(now())
+
+  conversations Conversation[]
+
+  @@index([phone])
+}
+
+/// Conversation: ventana de diálogo con un contacto.
+/// Permite reconstruir el chat completo y calcular la ventana de 24h
+/// a partir de lastUserMessageAt (último mensaje IN del contacto).
+/// Futuro: companyId; una empresa puede tener varias conversaciones por contacto.
+model Conversation {
+  id                String    @id @default(cuid())
+  contactId         String
+  contact           Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  lastUserMessageAt DateTime? // Timestamp del último mensaje IN (para regla 24h)
+  createdAt         DateTime  @default(now())
+
+  messages Message[]
+
+  @@index([contactId])
+  @@index([contactId, createdAt(sort: Desc)])
+}
+
+/// Message: mensaje entrante o saliente de WhatsApp.
+/// Almacena whatsappMessageId (WAMID) único y timestamp original para
+/// idempotencia y reconstrucción del historial.
+/// Para texto: body contiene el texto; type = TEXT.
+/// Para media (imagen, video, audio, documento): type = IMAGE|VIDEO|AUDIO|DOCUMENT,
+/// mediaUrl = URL pública o firmada (no se guardan binarios), body = caption opcional.
+model Message {
+  id                String          @id @default(cuid())
+  conversationId    String
+  conversation      Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  direction         MessageDirection
+  type              MessageType      @default(TEXT)
+  status            MessageStatus    @default(SENT)
+  body              String           // Texto del mensaje, caption (para media) o referencia a template
+  whatsappMessageId String           @unique // WAMID - único por mensaje en WhatsApp
+  whatsappTimestamp DateTime        // Timestamp original de WhatsApp (entrante o confirmación)
+  fromAi            Boolean?         @default(false) // Informativo: si la respuesta fue generada por IA
+  // Media: URLs únicamente (no binarios). Escalable a multi-empresa (bucket por tenant en el futuro).
+  mediaUrl          String?          // URL pública o firmada del archivo (imagen, video, audio, documento)
+  mimeType          String?          // MIME type para renderizar o descargar (ej. image/jpeg, application/pdf)
+  fileName          String?          // Nombre del archivo (útil para documentos)
+  createdAt         DateTime        @default(now())
+
+  @@index([conversationId])
+  @@index([conversationId, whatsappTimestamp(sort: Asc)])
+  @@index([whatsappMessageId])
+}
+
+/// BroadcastLog: registro de cada envío en una campaña de mensajes masivos.
+/// Permite auditoría y feedback (sent/failed). Futuro: companyId para multi-tenant.
+model BroadcastLog {
+  id             String   @id @default(cuid())
+  conversationId String   // Conversación a la que se envió
+  type           String   // manual | template | ia
+  status         String   // sent | failed
+  errorMessage   String?  // Mensaje de error si status = failed
+  createdAt      DateTime @default(now())
+  // Futuro: companyId, userId (quién disparó el broadcast), batchId (agrupar envíos)
+
+  @@index([conversationId])
+  @@index([createdAt(sort: Desc)])
+}
