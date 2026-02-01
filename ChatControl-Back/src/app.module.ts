@@ -6,6 +6,9 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { ChatModule } from './chat/chat.module';
 import { AiModule } from './ai/ai.module';
 import { BroadcastModule } from './broadcast/broadcast.module';
+import { ContactsModule } from './contacts/contacts.module';
+import { TemplatesModule } from './templates/templates.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -16,6 +19,9 @@ import { BroadcastModule } from './broadcast/broadcast.module';
     ChatModule,
     AiModule,
     BroadcastModule,
+    ContactsModule,
+    TemplatesModule,
+    SettingsModule,
   ],
 })
 export class AppModule {}

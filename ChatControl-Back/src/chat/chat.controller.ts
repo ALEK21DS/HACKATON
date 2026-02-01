@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -47,6 +48,12 @@ export class ChatController {
     return this.chat.getMessages(id);
   }
 
+  @Patch('conversations/:id/read')
+  async markAsRead(@Param('id') id: string) {
+    await this.chat.markConversationAsRead(id);
+    return { ok: true };
+  }
+
   @Get('conversations/:id/can-send')
   async canSend(@Param('id') id: string) {
     const [canSend, windowSecondsRemaining] = await Promise.all([
@@ -68,7 +75,7 @@ export class ChatController {
   /** Generar respuesta con IA (no envía; el frontend decide enviar o editar) */
   @Post('conversations/:id/generate-reply')
   async generateReply(@Param('id') id: string) {
-    const text = await this.chat.generateAiReply(id);
-    return { ok: true, text };
+    const { text, usedFallbackModel } = await this.chat.generateAiReply(id);
+    return { ok: true, text, usedFallbackModel };
   }
 }

@@ -18,6 +18,7 @@ import {
 } from '@/lib/api';
 import styles from '../chat/chat.module.css';
 import broadcastStyles from './broadcast.module.css';
+import { formatPhoneDisplay } from '@/lib/format';
 
 const WS_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -45,9 +46,44 @@ function BroadcastIcon({ className }: { className?: string }) {
   );
 }
 
+function TemplateIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
+    </svg>
+  );
+}
+
+function SettingsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
+    </svg>
+  );
+}
+
+function MenuIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
+    </svg>
+  );
+}
+
+function LogoutIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z" />
+    </svg>
+  );
+}
+
+const NAV_COLLAPSED_KEY = 'chatcontrol_nav_collapsed';
+
 export default function BroadcastPage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(false);
   const [contacts, setContacts] = useState<BroadcastContact[]>([]);
   const [templates, setTemplates] = useState<BroadcastTemplate[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -66,7 +102,13 @@ export default function BroadcastPage() {
   const [progressFailed, setProgressFailed] = useState(0);
   const [progressErrors, setProgressErrors] = useState<Array<{ conversationId: string; error: string }>>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [toast, setToast] = useState('');
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const socketRef = useRef<Socket | null>(null);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const LIMIT_MSG = 'No puedes agregar más conversaciones, has superado el límite diario de tu tier.';
+  const FALLBACK_TOAST = 'Error con el modelo de Gemini, se está utilizando el modelo gratuito gemini-2.5-flash';
 
   const filteredContacts = searchQuery.trim()
     ? contacts.filter((c) => {
@@ -80,6 +122,8 @@ export default function BroadcastPage() {
   /** Algún contacto seleccionado está fuera del límite de 24h → bloquear Mensaje con IA */
   const selectedContactList = contacts.filter((c) => selectedIds.has(c.id));
   const hasSelectedOutsideLimit = selectedContactList.some((c) => !c.canSend);
+  /** Algún contacto no está autorizado en Meta (sandbox) → bloquear envío */
+  const hasSelectedNotSandboxAuthorized = selectedContactList.some((c) => !c.isSandboxAuthorized);
 
   /** Formato: "Quedan X horas" o "Quedan menos de 1 hora" / "Fuera del límite" */
   function formatWindowStatus(c: BroadcastContact): string {
@@ -96,6 +140,37 @@ export default function BroadcastPage() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!mounted || typeof window === 'undefined') return;
+    const stored = localStorage.getItem(NAV_COLLAPSED_KEY);
+    setNavCollapsed(stored === 'true');
+  }, [mounted]);
+
+  function toggleNavCollapsed() {
+    setNavCollapsed((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') localStorage.setItem(NAV_COLLAPSED_KEY, String(next));
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
+    }
+    if (userMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [userMenuOpen]);
+
+  /** Si hay contactos fuera del límite seleccionados, forzar tipo "Plantilla aprobada" y bloquear manual/IA */
+  useEffect(() => {
+    if (hasSelectedOutsideLimit && (messageType === 'manual' || messageType === 'ia')) {
+      setMessageType('template');
+    }
+  }, [hasSelectedOutsideLimit, messageType]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -167,9 +242,11 @@ export default function BroadcastPage() {
     setGenerating(true);
     setError('');
     setGeneratedText('');
+    setToast('');
     try {
       const res = await generateBroadcastMessage(instruction.trim());
       setGeneratedText(res.text ?? '');
+      if (res.usedFallbackModel) setToast(FALLBACK_TOAST);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al generar mensaje');
     } finally {
@@ -196,7 +273,8 @@ export default function BroadcastPage() {
   const canSend =
     selectedIds.size > 0 &&
     (messageType === 'template' ? !!templateId && !!getMessageToSend() : !!getMessageToSend()) &&
-    (messageType !== 'ia' || !hasSelectedOutsideLimit);
+    (messageType !== 'ia' || !hasSelectedOutsideLimit) &&
+    !hasSelectedNotSandboxAuthorized;
 
   const handleSend = async () => {
     if (!canSend || sending) return;
@@ -204,6 +282,7 @@ export default function BroadcastPage() {
     if (!messageToSend) return;
     setSending(true);
     setError('');
+    setToast('');
     setProgressTotal(0);
     setProgressSent(0);
     setProgressFailed(0);
@@ -220,6 +299,8 @@ export default function BroadcastPage() {
       setProgressSent(result.sent);
       setProgressFailed(result.failed);
       setProgressErrors(result.errors ?? []);
+      const hasLimitError = (result.errors ?? []).some((e) => e.error?.includes('límite diario'));
+      if (hasLimitError) setToast(LIMIT_MSG);
       // Limpiar inputs y usuarios seleccionados tras enviar
       setSelectedIds(new Set());
       setInstruction('');
@@ -228,7 +309,9 @@ export default function BroadcastPage() {
       setTemplateId('');
       setTemplateVars({});
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al enviar mensajes masivos');
+      const msg = err instanceof Error ? err.message : 'Error al enviar mensajes masivos';
+      setError(msg);
+      if (msg.includes('límite diario')) setToast(LIMIT_MSG);
     } finally {
       setSending(false);
     }
@@ -258,7 +341,10 @@ export default function BroadcastPage() {
 
   return (
     <div className={styles.layout}>
-      <nav className={styles.navBar} aria-label="Menú principal">
+      <nav className={`${styles.navBar} ${navCollapsed ? styles.navBarCollapsed : ''}`} aria-label="Menú principal">
+        <button type="button" onClick={toggleNavCollapsed} className={styles.navToggle} title={navCollapsed ? 'Mostrar nombres' : 'Ocultar nombres'} aria-label={navCollapsed ? 'Expandir menú' : 'Colapsar menú'}>
+          <MenuIcon />
+        </button>
         <div className={styles.navItems}>
           <Link href="/chat" className={styles.navItem} title="Mensajes">
             <ChatBubbleIcon />
@@ -268,11 +354,33 @@ export default function BroadcastPage() {
             <BroadcastIcon />
             <span className={styles.navLabel}>Masivos</span>
           </div>
+          <Link href="/contacts" className={styles.navItem} title="Contactos">
+            <PersonIcon />
+            <span className={styles.navLabel}>Contactos</span>
+          </Link>
+          <Link href="/templates" className={styles.navItem} title="Plantillas">
+            <TemplateIcon />
+            <span className={styles.navLabel}>Plantillas</span>
+          </Link>
         </div>
         <div className={styles.navFooter}>
-          <button type="button" onClick={handleLogout} className={styles.navLogout} title="Salir" aria-label="Cerrar sesión">
-            <PersonIcon />
-          </button>
+          <div className={styles.navUserWrap} ref={userMenuRef}>
+            <button type="button" onClick={() => setUserMenuOpen((o) => !o)} className={styles.navLogout} title="Usuario" aria-label="Menú de usuario" aria-expanded={userMenuOpen}>
+              <PersonIcon />
+            </button>
+            {userMenuOpen && (
+              <div className={styles.navUserDropdown} role="menu">
+                <Link href="/settings" className={styles.navUserOption} role="menuitem" onClick={() => setUserMenuOpen(false)}>
+                  <SettingsIcon />
+                  Config
+                </Link>
+                <button type="button" className={`${styles.navUserOption} ${styles.navUserOptionLogout}`} role="menuitem" onClick={() => { setUserMenuOpen(false); handleLogout(); }}>
+                  <LogoutIcon />
+                  Cerrar sesión
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </nav>
 
@@ -321,14 +429,14 @@ export default function BroadcastPage() {
                       checked={selectedIds.has(c.id)}
                       onChange={() => toggleContact(c.id)}
                       onClick={(e) => e.stopPropagation()}
-                      aria-label={`Seleccionar ${c.phone}`}
+                      aria-label={`Seleccionar ${c.name || formatPhoneDisplay(c.phone)}`}
                     />
                     <span className={styles.convAvatar} aria-hidden style={{ width: 36, height: 36, minWidth: 36, minHeight: 36 }}>
                       <PersonIcon />
                     </span>
                     <span className={styles.convContent}>
-                      <span className={styles.convPhone}>{c.name || c.phone}</span>
-                      {c.name && <span className={styles.convPhoneSub}>{c.phone}</span>}
+                      <span className={styles.convPhone}>{c.name || formatPhoneDisplay(c.phone)}</span>
+                      {c.name && <span className={styles.convPhoneSub}>{formatPhoneDisplay(c.phone)}</span>}
                       <span className={`${broadcastStyles.contactStatus} ${c.canSend ? broadcastStyles.contactStatusOk : broadcastStyles.contactStatusBlocked}`}>
                         {formatWindowStatus(c)}
                       </span>
@@ -344,7 +452,17 @@ export default function BroadcastPage() {
 
       <main className={styles.main}>
         <div className={broadcastStyles.broadcastMain}>
+          {toast && (
+            <p className={styles.badgeOk} style={{ marginBottom: '0.5rem', padding: '0.5rem 0.75rem', borderRadius: 8 }}>
+              {toast}
+            </p>
+          )}
           {error && <p className={styles.errorBar}>{error}</p>}
+          {hasSelectedNotSandboxAuthorized && (
+            <p className={styles.errorBar}>
+              Hay contactos no autorizados en Meta (sandbox). Agrégalos en Contactos y márcalos como autorizados para poder enviar mensajes.
+            </p>
+          )}
 
           <div className={broadcastStyles.typeSection}>
             <h3>Tipo de mensaje</h3>
@@ -353,6 +471,8 @@ export default function BroadcastPage() {
                 type="button"
                 className={`${broadcastStyles.typeBtn} ${messageType === 'manual' ? broadcastStyles.typeBtnActive : ''}`}
                 onClick={() => setMessageType('manual')}
+                disabled={hasSelectedOutsideLimit}
+                title={hasSelectedOutsideLimit ? 'Solo puedes usar Plantilla aprobada cuando hay contactos fuera del límite de 24h' : undefined}
               >
                 Mensaje manual
               </button>

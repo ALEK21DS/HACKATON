@@ -48,11 +48,14 @@ export function isLoggedIn(): boolean {
 export interface Conversation {
   id: string;
   phone: string;
-  /** Nombre del contacto (opcional; si el backend lo añade, la búsqueda lo usará) */
   name?: string;
+  /** Solo pruebas: número autorizado en Meta (sandbox). Si false, no se puede enviar en modo sandbox. */
+  isSandboxAuthorized?: boolean;
   lastUserMessageAt: number | null;
   lastMessagePreview: string;
   lastMessageAt: number;
+  /** Número de mensajes entrantes no leídos. */
+  unreadCount?: number;
 }
 
 export interface Message {
@@ -88,6 +91,10 @@ export async function getMessages(conversationId: string): Promise<Message[]> {
   return api<Message[]>(`/chat/conversations/${conversationId}/messages`);
 }
 
+export async function markConversationAsRead(conversationId: string): Promise<void> {
+  await api<{ ok: boolean }>(`/chat/conversations/${conversationId}/read`, { method: 'PATCH' });
+}
+
 export async function canSend(conversationId: string): Promise<{
   canSend: boolean;
   windowSecondsRemaining: number;
@@ -107,7 +114,7 @@ export async function sendMessage(
 
 export async function generateReply(
   conversationId: string,
-): Promise<{ ok: boolean; text: string }> {
+): Promise<{ ok: boolean; text: string; usedFallbackModel?: boolean }> {
   return api(`/chat/conversations/${conversationId}/generate-reply`, {
     method: 'POST',
   });
@@ -122,6 +129,7 @@ export interface BroadcastContact {
   windowSecondsRemaining: number;
   lastMessagePreview: string;
   lastMessageAt: number;
+  isSandboxAuthorized: boolean;
 }
 
 export interface BroadcastTemplate {
@@ -141,8 +149,8 @@ export async function getBroadcastTemplates(): Promise<BroadcastTemplate[]> {
   return api<BroadcastTemplate[]>('/broadcast/templates');
 }
 
-export async function generateBroadcastMessage(instruction: string): Promise<{ text: string }> {
-  return api<{ text: string }>('/broadcast/generate-message', {
+export async function generateBroadcastMessage(instruction: string): Promise<{ text: string; usedFallbackModel?: boolean }> {
+  return api<{ text: string; usedFallbackModel?: boolean }>('/broadcast/generate-message', {
     method: 'POST',
     body: JSON.stringify({ instruction }),
   });
@@ -158,5 +166,112 @@ export async function sendBroadcast(params: {
   return api('/broadcast/send', {
     method: 'POST',
     body: JSON.stringify(params),
+  });
+}
+
+// Contactos (sandbox: autorización manual en Meta)
+export interface ContactItem {
+  id: string;
+  phone: string;
+  name: string | null;
+  isSandboxAuthorized: boolean;
+  createdAt: number;
+}
+
+export async function getContactsList(): Promise<ContactItem[]> {
+  return api<ContactItem[]>('/contacts');
+}
+
+export async function getContact(id: string): Promise<{ ok: boolean; contact: ContactItem | null }> {
+  return api(`/contacts/${id}`);
+}
+
+export async function createContact(params: {
+  phone: string;
+  name?: string;
+  isSandboxAuthorized?: boolean;
+}): Promise<{ ok: boolean; contact: ContactItem }> {
+  return api('/contacts', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function updateContact(
+  id: string,
+  params: { name?: string; isSandboxAuthorized?: boolean },
+): Promise<{ ok: boolean; contact: ContactItem }> {
+  return api(`/contacts/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(params),
+  });
+}
+
+// Plantillas (para Mensajes masivos > Plantilla aprobada)
+export interface TemplateItem {
+  id: string;
+  name: string;
+  body: string;
+  variables: string[];
+  createdAt?: number;
+  updatedAt?: number;
+  language?: string;
+}
+
+/** Plantillas aprobadas de la cuenta WhatsApp Business (Meta). Mismo formato que TemplateItem. */
+export async function getTemplatesFromMeta(): Promise<TemplateItem[]> {
+  return api<TemplateItem[]>('/templates/from-meta');
+}
+
+export async function getTemplatesList(): Promise<TemplateItem[]> {
+  return api<TemplateItem[]>('/templates');
+}
+
+export async function getTemplate(id: string): Promise<{ ok: boolean; template: TemplateItem | null }> {
+  return api(`/templates/${id}`);
+}
+
+export async function createTemplate(params: { name: string; body: string }): Promise<{ ok: boolean; template: TemplateItem }> {
+  return api('/templates', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function updateTemplate(
+  id: string,
+  params: { name?: string; body?: string },
+): Promise<{ ok: boolean; template: TemplateItem }> {
+  return api(`/templates/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function deleteTemplate(id: string): Promise<{ ok: boolean }> {
+  return api(`/templates/${id}`, { method: 'DELETE' });
+}
+
+// Configuración (tier WhatsApp + modelo Gemini)
+export type WhatsappTier = 'new' | 'level1' | 'level2' | 'level3' | 'excellent';
+
+export interface SettingsData {
+  whatsappTier: WhatsappTier;
+  dailyLimit: number | null; // null = ilimitado
+  geminiModel: string;
+  geminiModelInUse: string;
+}
+
+export async function getSettings(): Promise<SettingsData> {
+  return api<SettingsData>('/settings');
+}
+
+export async function updateSettings(body: {
+  whatsappTier?: WhatsappTier;
+  geminiModel?: string;
+}): Promise<SettingsData> {
+  return api<SettingsData>('/settings', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
   });
 }

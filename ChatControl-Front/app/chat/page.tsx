@@ -10,6 +10,7 @@ import {
   getConversations,
   getMessages,
   getConversation,
+  markConversationAsRead,
   sendMessage,
   generateReply,
   logout,
@@ -18,6 +19,7 @@ import {
   type NewMessagePayload,
 } from '@/lib/api';
 import styles from './chat.module.css';
+import { formatPhoneDisplay } from '@/lib/format';
 
 const WS_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -48,9 +50,67 @@ function BroadcastIcon({ className }: { className?: string }) {
   );
 }
 
+/** Icono de plantilla/documento */
+function TemplateIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
+    </svg>
+  );
+}
+
+/** Formatea timestamp (ms) a hora tipo "10:05 AM" */
+function formatMessageTime(timestamp: number): string {
+  const d = new Date(timestamp);
+  return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
+/** Formatea timestamp a etiqueta de día: "1/17/2026" o "Hoy", "Ayer" */
+function formatDateLabel(timestamp: number): string {
+  const d = new Date(timestamp);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const msgDay = new Date(d);
+  msgDay.setHours(0, 0, 0, 0);
+  const diffDays = Math.floor((today.getTime() - msgDay.getTime()) / (24 * 60 * 60 * 1000));
+  if (diffDays === 0) return 'Hoy';
+  if (diffDays === 1) return 'Ayer';
+  return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'numeric', year: 'numeric' });
+}
+
+/** Icono de engranaje para Configuración */
+function SettingsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
+    </svg>
+  );
+}
+
+/** Icono de 3 líneas (menú): colapsar/expandir barra */
+function MenuIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
+    </svg>
+  );
+}
+
+/** Icono de cerrar sesión (salir) */
+function LogoutIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z" />
+    </svg>
+  );
+}
+
+const NAV_COLLAPSED_KEY = 'chatcontrol_nav_collapsed';
+
 export default function ChatPage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -63,9 +123,16 @@ export default function ChatPage() {
   const [generating, setGenerating] = useState(false);
   const [generatedText, setGeneratedText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [toast, setToast] = useState('');
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const selectedIdRef = useRef<string | null>(null);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   selectedIdRef.current = selectedId;
+
+  const LIMIT_MSG = 'No puedes agregar más conversaciones, has superado el límite diario de tu tier.';
+  const FALLBACK_TOAST = 'Error con el modelo de Gemini, se está utilizando el modelo gratuito gemini-2.5-flash';
 
   // Filtrar conversaciones por número o nombre (si existe)
   const filteredConversations = searchQuery.trim()
@@ -81,6 +148,30 @@ export default function ChatPage() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!mounted || typeof window === 'undefined') return;
+    const stored = localStorage.getItem(NAV_COLLAPSED_KEY);
+    setNavCollapsed(stored === 'true');
+  }, [mounted]);
+
+  function toggleNavCollapsed() {
+    setNavCollapsed((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') localStorage.setItem(NAV_COLLAPSED_KEY, String(next));
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
+    }
+    if (userMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [userMenuOpen]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -121,13 +212,22 @@ export default function ChatPage() {
     };
   }, [mounted]);
 
+  // ESC: cerrar el chat abierto y volver al estado "seleccione un chat"
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return;
+      if (selectedIdRef.current) setSelectedId(null);
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   async function loadConversations() {
     setLoading(true);
     setError('');
     try {
       const list = await getConversations();
       setConversations(list);
-      if (list.length && !selectedId) setSelectedId(list[0].id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al cargar conversaciones');
       if (String(err).includes('401')) {
@@ -157,6 +257,10 @@ export default function ChatPage() {
         setMessages(msgList);
         setCanSend(convRes.canSend ?? false);
         setWindowSecondsRemaining(convRes.windowSecondsRemaining ?? 0);
+        await markConversationAsRead(selectedId);
+        if (cancelled) return;
+        const list = await getConversations();
+        if (!cancelled) setConversations(list);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Error');
       }
@@ -166,12 +270,21 @@ export default function ChatPage() {
     };
   }, [selectedId]);
 
+  // Scroll al final del chat al abrir la conversación o al cambiar los mensajes
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [selectedId, messages]);
+
   const selectedConv = conversations.find((c) => c.id === selectedId);
+  const isSandboxBlocked = selectedConv && selectedConv.isSandboxAuthorized === false;
 
   async function handleSend(text: string) {
     if (!selectedId || !text.trim() || sending || !canSend) return;
     setSending(true);
     setError('');
+    setToast('');
     try {
       await sendMessage(selectedId, text.trim());
       const convRes = await getConversation(selectedId);
@@ -182,7 +295,9 @@ export default function ChatPage() {
       setReplyInput('');
       setGeneratedText('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al enviar');
+      const msg = err instanceof Error ? err.message : 'Error al enviar';
+      setError(msg);
+      if (msg.includes('límite diario')) setToast(LIMIT_MSG);
     } finally {
       setSending(false);
     }
@@ -193,10 +308,12 @@ export default function ChatPage() {
     setGenerating(true);
     setError('');
     setGeneratedText('');
+    setToast('');
     try {
       const res = await generateReply(selectedId);
       setGeneratedText(res.text ?? '');
       setReplyInput(res.text ?? '');
+      if (res.usedFallbackModel) setToast(FALLBACK_TOAST);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al generar respuesta');
     } finally {
@@ -208,8 +325,10 @@ export default function ChatPage() {
     if (!selectedId || sending || !canSend) return;
     setSending(true);
     setError('');
+    setToast('');
     try {
-      const { text } = await generateReply(selectedId);
+      const { text, usedFallbackModel } = await generateReply(selectedId);
+      if (usedFallbackModel) setToast(FALLBACK_TOAST);
       if (!text?.trim()) {
         setError('La IA no generó texto');
         return;
@@ -223,7 +342,9 @@ export default function ChatPage() {
       setReplyInput('');
       setGeneratedText('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error');
+      const msg = err instanceof Error ? err.message : 'Error';
+      setError(msg);
+      if (msg.includes('límite diario')) setToast(LIMIT_MSG);
     } finally {
       setSending(false);
     }
@@ -252,8 +373,11 @@ export default function ChatPage() {
 
   return (
     <div className={styles.layout}>
-      {/* Menú lateral izquierdo tipo WhatsApp: primera opción = Mensajes */}
-      <nav className={styles.navBar} aria-label="Menú principal">
+      {/* Menú lateral: icono + texto en fila; botón 3 líneas colapsa (solo iconos) */}
+      <nav className={`${styles.navBar} ${navCollapsed ? styles.navBarCollapsed : ''}`} aria-label="Menú principal">
+        <button type="button" onClick={toggleNavCollapsed} className={styles.navToggle} title={navCollapsed ? 'Mostrar nombres' : 'Ocultar nombres'} aria-label={navCollapsed ? 'Expandir menú' : 'Colapsar menú'}>
+          <MenuIcon />
+        </button>
         <div className={styles.navItems}>
           <div className={styles.navItemActive} title="Mensajes">
             <ChatBubbleIcon />
@@ -263,17 +387,40 @@ export default function ChatPage() {
             <BroadcastIcon />
             <span className={styles.navLabel}>Masivos</span>
           </Link>
+          <Link href="/contacts" className={styles.navItem} title="Contactos">
+            <PersonIcon />
+            <span className={styles.navLabel}>Contactos</span>
+          </Link>
+          <Link href="/templates" className={styles.navItem} title="Plantillas">
+            <TemplateIcon />
+            <span className={styles.navLabel}>Plantillas</span>
+          </Link>
         </div>
         <div className={styles.navFooter}>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className={styles.navLogout}
-            title="Salir"
-            aria-label="Cerrar sesión"
-          >
-            <PersonIcon />
-          </button>
+          <div className={styles.navUserWrap} ref={userMenuRef}>
+            <button
+              type="button"
+              onClick={() => setUserMenuOpen((o) => !o)}
+              className={styles.navLogout}
+              title="Usuario"
+              aria-label="Menú de usuario"
+              aria-expanded={userMenuOpen}
+            >
+              <PersonIcon />
+            </button>
+            {userMenuOpen && (
+              <div className={styles.navUserDropdown} role="menu">
+                <Link href="/settings" className={styles.navUserOption} role="menuitem" onClick={() => setUserMenuOpen(false)}>
+                  <SettingsIcon />
+                  Config
+                </Link>
+                <button type="button" className={`${styles.navUserOption} ${styles.navUserOptionLogout}`} role="menuitem" onClick={() => { setUserMenuOpen(false); handleLogout(); }}>
+                  <LogoutIcon />
+                  Cerrar sesión
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </nav>
 
@@ -310,24 +457,32 @@ export default function ChatPage() {
           <p className={styles.muted}>Ningún resultado para &quot;{searchQuery.trim()}&quot;</p>
         ) : (
           <ul className={styles.convList}>
-            {filteredConversations.map((c, i) => (
-              <li key={c.id} className={styles.convItem} style={{ animationDelay: `${i * 0.04}s` }}>
-                <button
-                  type="button"
-                  className={selectedId === c.id ? styles.convActive : styles.convBtn}
-                  onClick={() => setSelectedId(c.id)}
-                >
-                  <span className={styles.convAvatar} aria-hidden>
-                    <PersonIcon />
-                  </span>
-                  <span className={styles.convContent}>
-                    <span className={styles.convPhone}>{c.name || c.phone}</span>
-                    {c.name && <span className={styles.convPhoneSub}>{c.phone}</span>}
-                    <span className={styles.convPreview}>{c.lastMessagePreview || '—'}</span>
-                  </span>
-                </button>
-              </li>
-            ))}
+            {filteredConversations.map((c, i) => {
+              const unread = (c.unreadCount ?? 0) > 0;
+              return (
+                <li key={c.id} className={styles.convItem} style={{ animationDelay: `${i * 0.04}s` }}>
+                  <button
+                    type="button"
+                    className={`${selectedId === c.id ? styles.convActive : styles.convBtn} ${unread ? styles.convUnread : ''}`}
+                    onClick={() => setSelectedId(c.id)}
+                  >
+                    <span className={styles.convAvatar} aria-hidden>
+                      <PersonIcon />
+                    </span>
+                    <span className={styles.convContent}>
+                      <span className={styles.convPhone}>{c.name || formatPhoneDisplay(c.phone)}</span>
+                      {c.name && <span className={styles.convPhoneSub}>{formatPhoneDisplay(c.phone)}</span>}
+                      <span className={styles.convPreview}>{c.lastMessagePreview || '—'}</span>
+                    </span>
+                    {unread && (
+                      <span className={styles.unreadBadge} aria-label={`${c.unreadCount} mensajes no leídos`}>
+                        {Math.min(c.unreadCount ?? 0, 99)}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </aside>
@@ -339,7 +494,10 @@ export default function ChatPage() {
                 <PersonIcon />
               </span>
               <div className={styles.headerInfo}>
-                <span className={styles.headerPhone}>{selectedConv?.phone ?? selectedId}</span>
+                <span className={styles.headerPhone}>{selectedConv?.name || formatPhoneDisplay(selectedConv?.phone ?? selectedId)}</span>
+                {selectedConv?.name && selectedConv?.phone && (
+                  <span className={styles.convPhoneSub} style={{ display: 'block', marginTop: '0.15rem' }}>{formatPhoneDisplay(selectedConv.phone)}</span>
+                )}
                 <div className={styles.windowBadge}>
                   {canSend ? (
                     <span className={styles.badgeOk}>
@@ -356,25 +514,57 @@ export default function ChatPage() {
                 </div>
               </div>
             </header>
+            {toast && (
+              <p className={styles.badgeOk} style={{ margin: '0 1rem 0.5rem', padding: '0.5rem 0.75rem', borderRadius: 8 }}>
+                {toast}
+              </p>
+            )}
             {error && <p className={styles.errorBar}>{error}</p>}
-            <div className={styles.messages}>
-              {messages.map((m, i) => (
-                <div
-                  key={m.id}
-                  className={m.fromUser ? styles.msgUser : styles.msgAgent}
-                  style={{ animationDelay: `${i * 0.03}s` }}
-                >
-                  <span className={styles.msgText}>{m.text}</span>
-                  {m.fromAi && <span className={styles.msgAiTag}>IA</span>}
-                </div>
-              ))}
+            {isSandboxBlocked && (
+              <p className={styles.errorBar}>
+                Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado para poder enviar mensajes.
+              </p>
+            )}
+            <div ref={messagesContainerRef} className={styles.messages}>
+              {(() => {
+                type Item = { type: 'date'; label: string } | { type: 'msg'; message: Message };
+                const items: Item[] = [];
+                let lastDate = '';
+                messages.forEach((m, i) => {
+                  const dateLabel = formatDateLabel(m.timestamp);
+                  if (dateLabel !== lastDate) {
+                    lastDate = dateLabel;
+                    items.push({ type: 'date', label: dateLabel });
+                  }
+                  items.push({ type: 'msg', message: m });
+                });
+                return items.map((item, i) =>
+                  item.type === 'date' ? (
+                    <div key={`date-${item.label}-${i}`} className={styles.msgDateSeparator}>
+                      {item.label}
+                    </div>
+                  ) : (
+                    <div
+                      key={item.message.id}
+                      className={item.message.fromUser ? styles.msgUser : styles.msgAgent}
+                      style={{ animationDelay: `${i * 0.03}s` }}
+                    >
+                      <div className={styles.msgBubbleContent}>
+                        <span className={styles.msgText}>{item.message.text}</span>
+                        <span className={styles.msgTime}>{formatMessageTime(item.message.timestamp)}</span>
+                      </div>
+                      {item.message.fromAi && <span className={styles.msgAiTag}>IA</span>}
+                    </div>
+                  ),
+                );
+              })()}
             </div>
             <div className={styles.actions}>
               <div className={styles.actionRow}>
                 <button
                   type="button"
                   onClick={handleSendAiAuto}
-                  disabled={sending || !canSend}
+                  disabled={sending || !canSend || isSandboxBlocked}
                   className={styles.btnSecondary}
                   title="Generar respuesta con IA y enviar sin validación"
                 >
@@ -391,58 +581,37 @@ export default function ChatPage() {
                 </button>
                 <span className={styles.hint}>Responder manualmente: escribe abajo y envía</span>
               </div>
-              {(generatedText || replyInput) && (
-                <div className={styles.replyRow}>
-                  <textarea
-                    value={replyInput}
-                    onChange={(e) => setReplyInput(e.target.value)}
-                    placeholder="Escribe o edita la respuesta..."
-                    className={styles.textarea}
-                    rows={3}
-                    disabled={!canSend}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleSend(replyInput)}
-                    disabled={sending || !replyInput.trim() || !canSend}
-                    className={styles.btnPrimary}
-                  >
-                    Enviar
-                  </button>
-                </div>
-              )}
-              {!generatedText && !replyInput && (
-                <div className={styles.replyRow}>
-                  <input
-                    value={replyInput}
-                    onChange={(e) => setReplyInput(e.target.value)}
-                    placeholder="Escribe un mensaje manual..."
-                    className={styles.input}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSend(replyInput);
-                      }
-                    }}
-                    disabled={!canSend}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleSend(replyInput)}
-                    disabled={sending || !replyInput.trim() || !canSend}
-                    className={styles.btnPrimary}
-                  >
-                    Enviar
-                  </button>
-                </div>
-              )}
+              <div className={styles.replyRow}>
+                <textarea
+                  value={replyInput}
+                  onChange={(e) => setReplyInput(e.target.value)}
+                  placeholder={generatedText ? 'Escribe o edita la respuesta...' : 'Escribe un mensaje manual...'}
+                  className={styles.textarea}
+                  rows={3}
+                  disabled={!canSend || isSandboxBlocked}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend(replyInput);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleSend(replyInput)}
+                  disabled={sending || !replyInput.trim() || !canSend || isSandboxBlocked}
+                  className={styles.btnPrimary}
+                >
+                  Enviar
+                </button>
+              </div>
             </div>
           </>
         ) : (
           <div className={styles.empty}>
             {conversations.length === 0
               ? 'No hay conversaciones. Los mensajes entrantes por WhatsApp aparecerán aquí.'
-              : 'Selecciona una conversación'}
+              : 'Seleccione un chat para enviar un mensaje'}
           </div>
         )}
       </main>

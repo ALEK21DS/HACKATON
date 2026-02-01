@@ -15,17 +15,17 @@ export class BroadcastController {
     return this.broadcast.getContacts();
   }
 
-  /** Lista plantillas (mock). TODO: Consumir desde API de WhatsApp. */
+  /** Lista plantillas (desde BD, usadas en Plantilla aprobada). */
   @Get('templates')
-  getTemplates() {
+  async getTemplates() {
     return this.broadcast.getTemplates();
   }
 
   /** Genera mensaje con IA. No envía; el usuario debe confirmar en el frontend. */
   @Post('generate-message')
   async generateMessage(@Body() dto: GenerateBroadcastMessageDto) {
-    const text = await this.broadcast.generateMessage(dto.instruction);
-    return { text };
+    const { text, usedFallbackModel } = await this.broadcast.generateMessage(dto.instruction);
+    return { text, usedFallbackModel };
   }
 
   /** Envía mensaje masivo. Valida 24h según tipo; emite eventos WebSocket de progreso. */

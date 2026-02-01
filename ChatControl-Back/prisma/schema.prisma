@@ -44,10 +44,13 @@ enum MessageStatus {
 /// Contact: número de WhatsApp externo (cliente).
 /// Un contacto puede tener múltiples conversaciones a lo largo del tiempo.
 /// Futuro: agregar companyId para multi-tenant sin romper esquema.
+/// TODO: eliminar isSandboxAuthorized en producción; en producción WhatsApp no permite autorizar números manualmente.
 model Contact {
-  id        String   @id @default(cuid())
-  phone     String   @unique // Número normalizado, ej: 5491112345678
-  createdAt DateTime @default(now())
+  id                  String   @id @default(cuid())
+  phone               String   @unique // Número normalizado, ej: 5491112345678
+  name                String?  // Nombre opcional (ej. para mostrar en UI)
+  isSandboxAuthorized Boolean  @default(false) // Solo pruebas: número autorizado en Meta (sandbox)
+  createdAt           DateTime @default(now())
 
   conversations Conversation[]
 
@@ -63,6 +66,7 @@ model Conversation {
   contactId         String
   contact           Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
   lastUserMessageAt DateTime? // Timestamp del último mensaje IN (para regla 24h)
+  lastReadAt        DateTime? // Última vez que el usuario abrió el chat (para contar no leídos)
   createdAt         DateTime  @default(now())
 
   messages Message[]
@@ -112,4 +116,26 @@ model BroadcastLog {
 
   @@index([conversationId])
   @@index([createdAt(sort: Desc)])
+}
+
+/// Configuración global de la app (tier WhatsApp, modelo Gemini). Una fila por clave.
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+}
+
+/// Plantillas para mensajes masivos (Plantilla aprobada). Variables en formato {{nombre}}.
+model Template {
+  id        String   @id @default(cuid())
+  name      String   // Nombre para mostrar (ej. "Bienvenida", "Recordatorio")
+  body      String   // Texto con variables {{variable}}
+  variables String[] // Nombres de variables extraídas del body (ej. ["nombre", "fecha"])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
 }

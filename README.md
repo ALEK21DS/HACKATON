@@ -118,8 +118,22 @@ HACKATON/
 - Rutas de chat protegidas con JWT.
 - Validación de ventana de 24h en el backend antes de enviar cualquier mensaje.
 
+## Modo Sandbox (Pruebas)
+
+En modo sandbox de WhatsApp Cloud API:
+
+1. **Los números deben ser autorizados manualmente en Meta Developers.** En la app de Meta (WhatsApp > Configuración o Números de prueba), añade los números que podrán recibir mensajes.
+2. **Luego deben ser agregados en la sección Contactos del sistema.** En la app, ve a **Contactos**, agrega el número (formato internacional, ej. 593981234567), opcionalmente un nombre, y marca **"Número autorizado en Meta (solo pruebas)"**.
+3. **Solo los contactos marcados como autorizados podrán recibir mensajes.** Si intentas enviar a un número no autorizado, el backend rechazará con "Este número no está autorizado en Meta (sandbox)" y la UI mostrará advertencia y deshabilitará el envío.
+
+**Importante:** En producción este flujo no existe. WhatsApp no permite autorizar números manualmente; los usuarios reciben mensajes según las políticas normales (ventana 24h, plantillas, etc.).
+
+**Variable de entorno:** `WHATSAPP_SANDBOX=true` en el backend activa la validación. En producción usar `false` o omitir.
+
+---
+
 ## TODOs / Futuras mejoras
 
+- **Producción:** eliminar `isSandboxAuthorized`; aplicar reglas reales de WhatsApp; primer mensaje solo con plantillas aprobadas; bloquear mensajes libres fuera de 24h.
 - Multi-empresa: companyId en Contact/Conversation, token de IA por empresa, usuarios por tenant.
 - Templates de WhatsApp para mensajes fuera de ventana 24h (cuando se requiera).
-- Refresco periódico de conversaciones y mensajes en el frontend (polling o WebSockets).

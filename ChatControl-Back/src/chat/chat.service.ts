@@ -1,9 +1,11 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { MessageDirection, MessageStatus, MessageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { Window24hService } from '../common/window-24h.service';
 import { AiService } from '../ai/ai.service';
+import { SettingsService } from '../settings/settings.service';
 import { ChatGateway } from './chat.gateway';
 
 export interface Message {
@@ -18,9 +20,14 @@ export interface Message {
 export interface Conversation {
   id: string;
   phone: string;
+  name?: string;
+  /** Solo pruebas: si el número está autorizado en Meta (sandbox). TODO: eliminar en producción. */
+  isSandboxAuthorized?: boolean;
   lastUserMessageAt: number | null;
   lastMessagePreview: string;
   lastMessageAt: number;
+  /** Número de mensajes entrantes no leídos (después de lastReadAt). */
+  unreadCount: number;
 }
 
 function normalizePhone(phone: string): string {
@@ -34,7 +41,9 @@ export class ChatService {
     private readonly whatsapp: WhatsAppService,
     private readonly window24h: Window24hService,
     private readonly ai: AiService,
+    private readonly settings: SettingsService,
     private readonly chatGateway: ChatGateway,
+    private readonly config: ConfigService,
   ) {}
 
   /** Registra mensaje entrante desde el webhook de WhatsApp */
@@ -101,16 +110,46 @@ export class ChatService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    return list.map((c) => {
-      const lastMsg = c.messages[0];
-      return {
-        id: c.id,
-        phone: c.contact.phone,
-        lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
-        lastMessagePreview: lastMsg?.body.slice(0, 80) ?? '',
-        lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
-      };
-    }).sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+    const withUnread = await Promise.all(
+      list.map(async (c) => {
+        const lastMsg = c.messages[0];
+        const unreadCount = await this.getUnreadCount(c.id);
+        return {
+          id: c.id,
+          phone: c.contact.phone,
+          name: c.contact.name ?? undefined,
+          isSandboxAuthorized: c.contact.isSandboxAuthorized,
+          lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
+          lastMessagePreview: lastMsg?.body.slice(0, 80) ?? '',
+          lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
+          unreadCount,
+        };
+      }),
+    );
+    return withUnread.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+  }
+
+  /** Cuenta mensajes entrantes (IN) con timestamp mayor que lastReadAt. */
+  private async getUnreadCount(conversationId: string): Promise<number> {
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { lastReadAt: true },
+    });
+    const since = conv?.lastReadAt ?? new Date(0);
+    return this.prisma.message.count({
+      where: {
+        conversationId,
+        direction: MessageDirection.IN,
+        whatsappTimestamp: { gt: since },
+      },
+    });
+  }
+
+  async markConversationAsRead(conversationId: string): Promise<void> {
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { lastReadAt: new Date() },
+    });
   }
 
   /**
@@ -161,12 +200,16 @@ export class ChatService {
     });
     if (!c) return undefined;
     const lastMsg = c.messages[0];
+    const unreadCount = await this.getUnreadCount(conversationId);
     return {
       id: c.id,
       phone: c.contact.phone,
+      name: c.contact.name ?? undefined,
+      isSandboxAuthorized: c.contact.isSandboxAuthorized,
       lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
       lastMessagePreview: lastMsg?.body.slice(0, 80) ?? '',
       lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
+      unreadCount,
     };
   }
 
@@ -200,6 +243,12 @@ export class ChatService {
       include: { contact: true },
     });
     if (!conv) throw new BadRequestException('Conversación no encontrada');
+    // TODO: eliminar en producción; en producción aplicar reglas reales de WhatsApp
+    const isSandbox = this.config.get<string>('WHATSAPP_SANDBOX', 'true') === 'true';
+    if (isSandbox && !conv.contact.isSandboxAuthorized) {
+      throw new ForbiddenException('Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.');
+    }
+    await this.settings.checkDailyLimitOrThrow(params.conversationId);
     const lastUserMessageAt = conv.lastUserMessageAt
       ? new Date(conv.lastUserMessageAt)
       : null;
@@ -234,7 +283,7 @@ export class ChatService {
     return msg;
   }
 
-  async generateAiReply(conversationId: string): Promise<string> {
+  async generateAiReply(conversationId: string): Promise<{ text: string; usedFallbackModel?: boolean }> {
     const conv = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
     });

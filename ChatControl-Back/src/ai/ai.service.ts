@@ -1,33 +1,38 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { SettingsService } from '../settings/settings.service';
+
+export interface AiGenerateResult {
+  text: string;
+  usedFallbackModel?: boolean;
+}
 
 /**
  * Servicio de IA con Gemini.
- * Por ahora: UN SOLO TOKEN global desde .env.
- * TODO: Permitir que cada empresa configure su propio token de IA (multi-tenant).
+ * Usa el modelo configurado en Settings; si falla (ej. modelo de pago sin suscripción), recurre a gemini-2.5-flash.
  */
 @Injectable()
 export class AiService {
   private readonly genAI: GoogleGenerativeAI | null = null;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly settings: SettingsService,
+  ) {
     const apiKey = this.config.get<string>('GEMINI_API_KEY');
     if (apiKey) this.genAI = new GoogleGenerativeAI(apiKey);
   }
 
   /**
    * Genera una respuesta de agente a partir del contexto reciente del chat.
-   * Contexto limitado (no se envía todo el historial).
-   * Reintenta una vez si hay 429 (cuota/rate limit).
+   * Usa el modelo configurado; si falla, recurre a gemini-2.5-flash y devuelve usedFallbackModel: true.
    */
-  async generateReply(context: string): Promise<string> {
+  async generateReply(context: string): Promise<AiGenerateResult> {
     if (!this.genAI) {
       throw new Error('GEMINI_API_KEY no configurada. Configurar en .env');
     }
-    // Modelo: gemini-2.5-flash suele tener free tier en cuentas nuevas (AI Studio); si da 404 probar gemini-pro
-    const modelId = this.config.get<string>('GEMINI_MODEL', 'gemini-2.5-flash');
-    const model = this.genAI.getGenerativeModel({ model: modelId });
+    const modelId = await this.settings.getGeminiModel();
     const prompt = `Eres un asistente de atención al cliente por WhatsApp. Responde de forma breve, profesional y útil. Solo texto, sin markdown ni emojis innecesarios.
 
 Contexto de la conversación:
@@ -35,43 +40,45 @@ ${context || '(Sin mensajes previos)'}
 
 Responde como agente (una sola respuesta):`;
 
-    const call = async (): Promise<string> => {
+    const callWithModel = async (mId: string): Promise<string> => {
+      const model = this.genAI!.getGenerativeModel({ model: mId });
       const result = await model.generateContent(prompt);
-      const response = result.response;
-      const text = response.text?.()?.trim() ?? '';
+      const text = result.response.text?.()?.trim() ?? '';
       return text || 'No pude generar una respuesta. Intenta de nuevo.';
     };
 
     try {
-      return await call();
+      const text = await callWithModel(modelId);
+      return { text };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const is429 = msg.includes('429') || msg.includes('quota') || msg.includes('Too Many Requests');
-      if (is429) {
-        await new Promise((r) => setTimeout(r, 14000)); // esperar ~14 s antes de reintentar
-        try {
-          return await call();
-        } catch (retryErr) {
+      const fallback = this.settings.getFallbackGeminiModel();
+      if (modelId === fallback) throw err;
+      try {
+        const text = await callWithModel(fallback);
+        await this.settings.setGeminiModelInUse(fallback);
+        return { text, usedFallbackModel: true };
+      } catch (fallbackErr) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const is429 = msg.includes('429') || msg.includes('quota') || msg.includes('Too Many Requests');
+        if (is429) {
           throw new Error(
             'Cuota de Gemini excedida. Espera unos minutos o revisa tu plan en https://ai.google.dev',
           );
         }
+        throw err;
       }
-      throw err;
     }
   }
 
   /**
    * Genera un mensaje a partir de una instrucción (ej. para mensajes masivos).
-   * Usa GEMINI_API_KEY desde .env. Si no está configurada, lanza error.
-   * TODO: token por empresa (multi-tenant).
+   * Usa el modelo configurado; si falla, recurre a gemini-2.5-flash.
    */
-  async generateFromInstruction(instruction: string): Promise<string> {
+  async generateFromInstruction(instruction: string): Promise<AiGenerateResult> {
     if (!this.genAI) {
       throw new Error('GEMINI_API_KEY no configurada. Configurar en .env');
     }
-    const modelId = this.config.get<string>('GEMINI_MODEL', 'gemini-2.5-flash');
-    const model = this.genAI.getGenerativeModel({ model: modelId });
+    const modelId = await this.settings.getGeminiModel();
     const prompt = `Eres un redactor de mensajes para WhatsApp. Genera UN SOLO mensaje de texto que cumpla la instrucción del usuario.
 
 Reglas:
@@ -83,8 +90,26 @@ Instrucción del usuario: ${instruction?.trim() || 'Escribe un mensaje amigable 
 
 Mensaje generado:`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text?.()?.trim() ?? '';
-    return text || 'No pude generar el mensaje. Intenta con otra instrucción.';
+    const callWithModel = async (mId: string): Promise<string> => {
+      const model = this.genAI!.getGenerativeModel({ model: mId });
+      const result = await model.generateContent(prompt);
+      const text = result.response.text?.()?.trim() ?? '';
+      return text || 'No pude generar el mensaje. Intenta con otra instrucción.';
+    };
+
+    try {
+      const text = await callWithModel(modelId);
+      return { text };
+    } catch (err) {
+      const fallback = this.settings.getFallbackGeminiModel();
+      if (modelId === fallback) throw err;
+      try {
+        const text = await callWithModel(fallback);
+        await this.settings.setGeminiModelInUse(fallback);
+        return { text, usedFallbackModel: true };
+      } catch {
+        throw err;
+      }
+    }
   }
 }
