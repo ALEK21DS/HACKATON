@@ -1,6 +1,4 @@
-// ChatControl MVP - PostgreSQL (Supabase) + Prisma
-// Diseñado para escalar a multi-empresa sin migraciones destructivas
-// (futuro: agregar companyId en Contact/Conversation)
+// ChatControl — PostgreSQL + Prisma (multi-empresa)
 
 generator client {
   provider = "prisma-client-js"
@@ -15,58 +13,141 @@ datasource db {
 // Enums
 // ---------------------------------------------------------------------------
 
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ORG_ADMIN
+  AGENT
+}
+
 enum MessageDirection {
-  IN   // Mensaje entrante (del contacto)
-  OUT  // Mensaje saliente (de la app)
+  IN
+  OUT
 }
 
 enum MessageType {
-  TEXT     // Mensaje de texto libre (ventana 24h)
-  TEMPLATE // Plantilla (fuera de ventana 24h - futuro)
-  IMAGE    // Imagen (URL en mediaUrl, caption opcional en body)
-  VIDEO    // Video (URL en mediaUrl, caption opcional en body)
-  AUDIO    // Audio (URL en mediaUrl)
-  DOCUMENT // Documento (URL en mediaUrl, fileName opcional)
+  TEXT
+  TEMPLATE
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
 }
 
 enum MessageStatus {
-  RECEIVED  // Mensaje entrante recibido
-  SENT      // Enviado a WhatsApp
-  DELIVERED // Entregado al dispositivo
-  READ      // Leído por el destinatario
-  FAILED    // Fallo en envío/entrega
+  RECEIVED
+  SENT
+  DELIVERED
+  READ
+  FAILED
 }
 
 // ---------------------------------------------------------------------------
-// Models
+// Multi-tenant core
 // ---------------------------------------------------------------------------
 
-/// Contact: número de WhatsApp externo (cliente).
-/// Un contacto puede tener múltiples conversaciones a lo largo del tiempo.
-/// Futuro: agregar companyId para multi-tenant sin romper esquema.
-/// TODO: eliminar isSandboxAuthorized en producción; en producción WhatsApp no permite autorizar números manualmente.
+model Organization {
+  id                   String             @id @default(cuid())
+  name                 String
+  status               OrganizationStatus @default(ACTIVE)
+  /// ID del número en Meta (metadata.phone_number_id). Índice para enrutar webhooks.
+  whatsappPhoneNumberId String?           @unique
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  users         User[]
+  contacts      Contact[]
+  templates     Template[]
+  credentials   OrganizationCredentials?
+  orgSettings   OrganizationSetting[]
+}
+
+/// Credenciales sensibles cifradas (AES-256-GCM). Solo el backend descifra.
+model OrganizationCredentials {
+  organizationId           String       @id
+  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  whatsappAccessTokenEnc   String?
+  whatsappBusinessAccountIdEnc String?
+  geminiApiKeyEnc          String?
+  updatedAt                DateTime     @updatedAt
+}
+
+/// Ajustes por empresa (modelo Gemini, tier, etc.)
+model OrganizationSetting {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  key            String
+  value          String
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  passwordHash   String
+  displayName    String?
+  role           UserRole
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  messagesSent      Message[]         @relation("MessageSentBy")
+  platformAuditLogs PlatformAuditLog[]
+
+  @@index([organizationId])
+  @@index([email])
+}
+
+/// Acciones del super admin sobre la plataforma (crear/suspender empresa, etc.).
+model PlatformAuditLog {
+  id                     String   @id @default(cuid())
+  actorUserId            String
+  actor                  User     @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  action                 String
+  targetOrganizationId   String?
+  metadata               Json?
+  createdAt              DateTime @default(now())
+
+  @@index([actorUserId])
+  @@index([targetOrganizationId])
+  @@index([createdAt(sort: Desc)])
+}
+
+// ---------------------------------------------------------------------------
+// Chat / WhatsApp
+// ---------------------------------------------------------------------------
+
 model Contact {
   id                  String   @id @default(cuid())
-  phone               String   @unique // Número normalizado, ej: 5491112345678
-  name                String?  // Nombre opcional (ej. para mostrar en UI)
-  isSandboxAuthorized Boolean  @default(false) // Solo pruebas: número autorizado en Meta (sandbox)
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  phone               String
+  name                String?
+  isSandboxAuthorized Boolean  @default(false)
   createdAt           DateTime @default(now())
 
   conversations Conversation[]
 
+  @@unique([organizationId, phone])
+  @@index([organizationId])
   @@index([phone])
 }
 
-/// Conversation: ventana de diálogo con un contacto.
-/// Permite reconstruir el chat completo y calcular la ventana de 24h
-/// a partir de lastUserMessageAt (último mensaje IN del contacto).
-/// Futuro: companyId; una empresa puede tener varias conversaciones por contacto.
 model Conversation {
   id                String    @id @default(cuid())
   contactId         String
   contact           Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  lastUserMessageAt DateTime? // Timestamp del último mensaje IN (para regla 24h)
-  lastReadAt        DateTime? // Última vez que el usuario abrió el chat (para contar no leídos)
+  lastUserMessageAt DateTime?
+  lastReadAt        DateTime?
   createdAt         DateTime  @default(now())
 
   messages Message[]
@@ -75,50 +156,46 @@ model Conversation {
   @@index([contactId, createdAt(sort: Desc)])
 }
 
-/// Message: mensaje entrante o saliente de WhatsApp.
-/// Almacena whatsappMessageId (WAMID) único y timestamp original para
-/// idempotencia y reconstrucción del historial.
-/// Para texto: body contiene el texto; type = TEXT.
-/// Para media (imagen, video, audio, documento): type = IMAGE|VIDEO|AUDIO|DOCUMENT,
-/// mediaUrl = URL pública o firmada (no se guardan binarios), body = caption opcional.
 model Message {
-  id                String          @id @default(cuid())
+  id                String           @id @default(cuid())
   conversationId    String
-  conversation      Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation      Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   direction         MessageDirection
   type              MessageType      @default(TEXT)
   status            MessageStatus    @default(SENT)
-  body              String           // Texto del mensaje, caption (para media) o referencia a template
-  whatsappMessageId String           @unique // WAMID - único por mensaje en WhatsApp
-  whatsappTimestamp DateTime        // Timestamp original de WhatsApp (entrante o confirmación)
-  fromAi            Boolean?         @default(false) // Informativo: si la respuesta fue generada por IA
-  // Media: URLs únicamente (no binarios). Escalable a multi-empresa (bucket por tenant en el futuro).
-  mediaUrl          String?          // URL pública o firmada del archivo (imagen, video, audio, documento)
-  mimeType          String?          // MIME type para renderizar o descargar (ej. image/jpeg, application/pdf)
-  fileName          String?          // Nombre del archivo (útil para documentos)
-  createdAt         DateTime        @default(now())
+  body              String
+  whatsappMessageId String           @unique
+  whatsappTimestamp DateTime
+  fromAi            Boolean?         @default(false)
+  mediaUrl          String?
+  mimeType          String?
+  fileName          String?
+  createdAt         DateTime         @default(now())
+  sentByUserId      String?
+  sentByUser        User?            @relation("MessageSentBy", fields: [sentByUserId], references: [id], onDelete: SetNull)
 
   @@index([conversationId])
   @@index([conversationId, whatsappTimestamp(sort: Asc)])
   @@index([whatsappMessageId])
+  @@index([sentByUserId])
 }
 
-/// BroadcastLog: registro de cada envío en una campaña de mensajes masivos.
-/// Permite auditoría y feedback (sent/failed). Futuro: companyId para multi-tenant.
 model BroadcastLog {
-  id             String   @id @default(cuid())
-  conversationId String   // Conversación a la que se envió
-  type           String   // manual | template | ia
-  status         String   // sent | failed
-  errorMessage   String?  // Mensaje de error si status = failed
-  createdAt      DateTime @default(now())
-  // Futuro: companyId, userId (quién disparó el broadcast), batchId (agrupar envíos)
+  id               String   @id @default(cuid())
+  organizationId   String?
+  conversationId String
+  userId           String?
+  type             String
+  status           String
+  errorMessage     String?
+  createdAt        DateTime @default(now())
 
   @@index([conversationId])
+  @@index([organizationId])
   @@index([createdAt(sort: Desc)])
 }
 
-/// Configuración global de la app (tier WhatsApp, modelo Gemini). Una fila por clave.
+/// Configuración global legacy (tier, modelo por defecto). Preferir OrganizationSetting por tenant.
 model AppSetting {
   id        String   @id @default(cuid())
   key       String   @unique
@@ -128,14 +205,16 @@ model AppSetting {
   @@index([key])
 }
 
-/// Plantillas para mensajes masivos (Plantilla aprobada). Variables en formato {{nombre}}.
 model Template {
-  id        String   @id @default(cuid())
-  name      String   // Nombre para mostrar (ej. "Bienvenida", "Recordatorio")
-  body      String   // Texto con variables {{variable}}
-  variables String[] // Nombres de variables extraídas del body (ej. ["nombre", "fecha"])
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  body           String
+  variables      String[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
+  @@index([organizationId])
   @@index([name])
 }

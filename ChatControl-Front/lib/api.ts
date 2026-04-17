@@ -26,14 +26,39 @@ export async function api<T>(
   return data as T;
 }
 
-// Auth
-export async function login(phone: string, password: string) {
+export type UserRole = 'SUPER_ADMIN' | 'ORG_ADMIN' | 'AGENT';
+
+export interface MeResponse {
+  id: string;
+  email: string;
+  displayName: string | null;
+  role: UserRole;
+  organizationId: string | null;
+  organizationName: string | null;
+}
+
+// Auth: email + contraseña (usuarios en BD)
+export async function login(email: string, password: string) {
   const data = await api<{ access_token: string }>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+  });
+  if (typeof window !== 'undefined') localStorage.setItem('chatcontrol_token', data.access_token);
+  return data;
+}
+
+/** Compatibilidad MVP: teléfono + APP_LOGIN_PASSWORD (usuario seed legacy) */
+export async function loginLegacy(phone: string, password: string) {
+  const data = await api<{ access_token: string }>('/auth/login-legacy', {
     method: 'POST',
     body: JSON.stringify({ phone, password }),
   });
   if (typeof window !== 'undefined') localStorage.setItem('chatcontrol_token', data.access_token);
   return data;
+}
+
+export async function getMe(): Promise<MeResponse> {
+  return api<MeResponse>('/auth/me');
 }
 
 export function logout() {
@@ -274,4 +299,134 @@ export async function updateSettings(body: {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+}
+
+// Plataforma (super admin)
+export interface PlatformOrganization {
+  id: string;
+  name: string;
+  status: string;
+  whatsappPhoneNumberId: string | null;
+  createdAt: string;
+  _count: { users: number; contacts: number };
+}
+
+export async function getPlatformOrganizations(): Promise<PlatformOrganization[]> {
+  return api<PlatformOrganization[]>('/platform/organizations');
+}
+
+export interface CreatePlatformOrganizationBody {
+  name: string;
+  adminEmail?: string;
+  adminPassword?: string;
+  adminDisplayName?: string;
+}
+
+export async function createPlatformOrganization(
+  body: CreatePlatformOrganizationBody,
+): Promise<{
+  id: string;
+  name: string;
+  status: string;
+  createdAt: string;
+  firstAdmin?: { id: string; email: string; displayName: string | null; role: string };
+}> {
+  return api('/platform/organizations', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function bootstrapPlatformOrganizationFirstAdmin(
+  organizationId: string,
+  body: { email: string; password: string; displayName?: string },
+): Promise<{ id: string; email: string; displayName: string | null; role: string }> {
+  return api(`/platform/organizations/${organizationId}/first-admin`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function setPlatformOrganizationStatus(
+  id: string,
+  status: 'ACTIVE' | 'SUSPENDED',
+): Promise<{ id: string; name: string; status: string }> {
+  return api(`/platform/organizations/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export interface PlatformAuditLogRow {
+  id: string;
+  action: string;
+  targetOrganizationId: string | null;
+  metadata: unknown;
+  createdAt: string;
+  actor: { id: string; email: string; displayName: string | null };
+}
+
+export async function getPlatformAuditLogs(params?: {
+  organizationId?: string;
+  take?: number;
+}): Promise<PlatformAuditLogRow[]> {
+  const q = new URLSearchParams();
+  if (params?.organizationId) q.set('organizationId', params.organizationId);
+  if (params?.take != null) q.set('take', String(params.take));
+  const suffix = q.toString() ? `?${q}` : '';
+  return api<PlatformAuditLogRow[]>(`/platform/audit-logs${suffix}`);
+}
+
+export interface OrgOutboundAuditRow {
+  id: string;
+  conversationId: string;
+  contactPhone: string;
+  contactName: string | null;
+  bodyPreview: string;
+  fromAi: boolean;
+  whatsappTimestamp: number;
+  sentBy: { id: string; email: string; displayName: string | null } | null;
+}
+
+export async function getOrgAuditOutbound(take?: number): Promise<OrgOutboundAuditRow[]> {
+  const q = take != null ? `?take=${take}` : '';
+  return api<OrgOutboundAuditRow[]>(`/org/audit/outbound${q}`);
+}
+
+// Integraciones (ORG_ADMIN)
+export interface IntegrationStatus {
+  hasWhatsappToken: boolean;
+  hasGeminiKey: boolean;
+  whatsappPhoneNumberId: string | null;
+}
+
+export async function getIntegrationStatus(): Promise<IntegrationStatus> {
+  return api<IntegrationStatus>('/org/integrations');
+}
+
+export async function updateIntegrations(body: {
+  whatsappAccessToken?: string;
+  whatsappPhoneNumberId?: string;
+  whatsappBusinessAccountId?: string;
+  geminiApiKey?: string;
+}): Promise<IntegrationStatus> {
+  return api<IntegrationStatus>('/org/integrations', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getOrgUsers(): Promise<
+  Array<{ id: string; email: string; displayName: string | null; role: UserRole; createdAt: string }>
+> {
+  return api('/org/users');
+}
+
+export async function createOrgUser(body: {
+  email: string;
+  password: string;
+  displayName?: string;
+  role: 'ORG_ADMIN' | 'AGENT';
+}): Promise<{ id: string; email: string }> {
+  return api('/org/users', { method: 'POST', body: JSON.stringify(body) });
 }

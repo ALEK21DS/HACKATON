@@ -1,13 +1,19 @@
 import {
+  ConnectedSocket,
+  MessageBody,
+  SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { Server } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma/prisma.service';
+import type { Message } from './chat.service';
+import type { JwtPayload } from '../auth/auth.types';
 
-/** Payload del evento new_message (mismo formato que Message en el frontend) */
 export interface NewMessagePayload {
   conversationId: string;
   message: {
@@ -18,15 +24,16 @@ export interface NewMessagePayload {
     timestamp: number;
     fromAi?: boolean;
   };
-  /** Para futura escalabilidad multi-empresa */
   companyId?: string;
 }
 
-/**
- * Gateway WebSocket (Socket.IO) para notificar mensajes nuevos en tiempo real.
- * El webhook de WhatsApp y el envío manual guardan en DB y luego emiten aquí;
- * el frontend escucha y actualiza sin polling.
- */
+type SocketUserData = {
+  userId?: string;
+  organizationId?: string | null;
+  email?: string;
+  currentConversationId?: string;
+};
+
 @WebSocketGateway({
   cors: { origin: process.env.FRONTEND_URL || 'http://localhost:3000' },
   transports: ['websocket', 'polling'],
@@ -37,33 +44,181 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private readonly logger = new Logger(ChatGateway.name);
 
-  handleConnection() {
-    this.logger.debug('Cliente WebSocket conectado');
+  constructor(
+    private readonly jwt: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  private data(client: Socket): SocketUserData {
+    return client.data as SocketUserData;
   }
 
-  handleDisconnect() {
+  private verifyClient(client: Socket): JwtPayload | null {
+    const raw =
+      (client.handshake.auth as { token?: string } | undefined)?.token ||
+      (typeof client.handshake.query.token === 'string' ? client.handshake.query.token : undefined);
+    if (!raw) return null;
+    try {
+      return this.jwt.verify<JwtPayload>(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  handleConnection(client: Socket) {
+    this.logger.debug('Cliente WebSocket conectado');
+    const payload = this.verifyClient(client);
+    if (!payload) return;
+    const d = this.data(client);
+    d.userId = payload.sub;
+    d.organizationId = payload.organizationId;
+    d.email = payload.email;
+    if (payload.organizationId) {
+      void client.join(`org:${payload.organizationId}`);
+    }
+    void client.join(`user:${payload.sub}`);
+  }
+
+  handleDisconnect(client: Socket) {
+    const d = this.data(client);
+    if (d.currentConversationId && d.userId) {
+      client.to(`conversation:${d.currentConversationId}`).emit('presence', {
+        conversationId: d.currentConversationId,
+        userId: d.userId,
+        displayName: d.email ?? d.userId,
+        state: 'left' as const,
+      });
+    }
     this.logger.debug('Cliente WebSocket desconectado');
   }
 
-  /**
-   * Emite new_message a todos los clientes conectados.
-   * Opcionalmente por sala conversation:conversationId o company:companyId para escalar.
-   */
-  emitNewMessage(conversationId: string, message: NewMessagePayload['message'], companyId?: string): void {
-    const payload: NewMessagePayload = { conversationId, message, companyId };
-    this.server.emit('new_message', payload);
+  @SubscribeMessage('join_conversation')
+  async joinConversation(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { conversationId?: string },
+  ): Promise<{ ok: boolean }> {
+    const payload = this.verifyClient(client);
+    if (!payload?.organizationId || !body?.conversationId) return { ok: false };
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id: body.conversationId, contact: { organizationId: payload.organizationId } },
+      select: { id: true },
+    });
+    if (!conv) return { ok: false };
+
+    const d = this.data(client);
+    const prev = d.currentConversationId;
+    if (prev && prev !== body.conversationId) {
+      await client.leave(`conversation:${prev}`);
+      client.to(`conversation:${prev}`).emit('presence', {
+        conversationId: prev,
+        userId: payload.sub,
+        displayName: payload.email,
+        state: 'left' as const,
+      });
+    }
+    await client.join(`conversation:${body.conversationId}`);
+    d.currentConversationId = body.conversationId;
+    client.to(`conversation:${body.conversationId}`).emit('presence', {
+      conversationId: body.conversationId,
+      userId: payload.sub,
+      displayName: payload.email,
+      state: 'in_chat' as const,
+    });
+    return { ok: true };
   }
 
-  /** Eventos de mensajes masivos: el frontend muestra progreso y errores en tiempo real */
-  emitBroadcastStarted(total: number): void {
-    this.server.emit('broadcast_started', { total });
+  @SubscribeMessage('leave_conversation')
+  async leaveConversation(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { conversationId?: string },
+  ): Promise<{ ok: boolean }> {
+    const payload = this.verifyClient(client);
+    if (!payload?.organizationId || !body?.conversationId) return { ok: false };
+    const d = this.data(client);
+    await client.leave(`conversation:${body.conversationId}`);
+    if (d.currentConversationId === body.conversationId) {
+      d.currentConversationId = undefined;
+    }
+    client.to(`conversation:${body.conversationId}`).emit('presence', {
+      conversationId: body.conversationId,
+      userId: payload.sub,
+      displayName: payload.email,
+      state: 'left' as const,
+    });
+    return { ok: true };
   }
 
-  emitBroadcastMessageSent(conversationId: string, index: number): void {
-    this.server.emit('broadcast_message_sent', { conversationId, index });
+  @SubscribeMessage('typing_start')
+  async typingStart(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { conversationId?: string },
+  ): Promise<{ ok: boolean }> {
+    const payload = this.verifyClient(client);
+    if (!payload?.organizationId || !body?.conversationId) return { ok: false };
+    const ok = await this.prisma.conversation.findFirst({
+      where: { id: body.conversationId, contact: { organizationId: payload.organizationId } },
+      select: { id: true },
+    });
+    if (!ok) return { ok: false };
+    client.to(`conversation:${body.conversationId}`).emit('typing', {
+      conversationId: body.conversationId,
+      userId: payload.sub,
+      displayName: payload.email,
+      typing: true,
+    });
+    return { ok: true };
   }
 
-  emitBroadcastMessageFailed(conversationId: string, index: number, errorMessage: string): void {
-    this.server.emit('broadcast_message_failed', { conversationId, index, errorMessage });
+  @SubscribeMessage('typing_stop')
+  async typingStop(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { conversationId?: string },
+  ): Promise<{ ok: boolean }> {
+    const payload = this.verifyClient(client);
+    if (!payload?.organizationId || !body?.conversationId) return { ok: false };
+    client.to(`conversation:${body.conversationId}`).emit('typing', {
+      conversationId: body.conversationId,
+      userId: payload.sub,
+      displayName: payload.email,
+      typing: false,
+    });
+    return { ok: true };
+  }
+
+  emitNewMessage(organizationId: string, conversationId: string, message: Message): void {
+    const payload: NewMessagePayload = {
+      conversationId,
+      message: {
+        id: message.id,
+        conversationId: message.conversationId,
+        fromUser: message.fromUser,
+        text: message.text,
+        timestamp: message.timestamp,
+        fromAi: message.fromAi,
+      },
+      companyId: organizationId,
+    };
+    this.server.to(`org:${organizationId}`).emit('new_message', payload);
+    this.server.to(`conversation:${conversationId}`).emit('new_message', payload);
+  }
+
+  emitBroadcastStarted(organizationId: string, total: number): void {
+    this.server.to(`org:${organizationId}`).emit('broadcast_started', { total });
+  }
+
+  emitBroadcastMessageSent(organizationId: string, conversationId: string, index: number): void {
+    this.server.to(`org:${organizationId}`).emit('broadcast_message_sent', { conversationId, index });
+    this.server.to(`conversation:${conversationId}`).emit('broadcast_message_sent', { conversationId, index });
+  }
+
+  emitBroadcastMessageFailed(
+    organizationId: string,
+    conversationId: string,
+    index: number,
+    errorMessage: string,
+  ): void {
+    const p = { conversationId, index, errorMessage };
+    this.server.to(`org:${organizationId}`).emit('broadcast_message_failed', p);
+    this.server.to(`conversation:${conversationId}`).emit('broadcast_message_failed', p);
   }
 }

@@ -8,6 +8,7 @@ import { io, Socket } from 'socket.io-client';
 import {
   isLoggedIn,
   logout,
+  getMe,
   getBroadcastContacts,
   getBroadcastTemplates,
   generateBroadcastMessage,
@@ -15,6 +16,7 @@ import {
   type BroadcastContact,
   type BroadcastTemplate,
   type BroadcastMessageType,
+  type UserRole,
 } from '@/lib/api';
 import styles from '../chat/chat.module.css';
 import broadcastStyles from './broadcast.module.css';
@@ -104,6 +106,7 @@ export default function BroadcastPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [myRole, setMyRole] = useState<UserRole | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -182,6 +185,9 @@ export default function BroadcastPage() {
       setLoading(true);
       setError('');
       try {
+        getMe()
+          .then((m) => setMyRole(m.role))
+          .catch(() => {});
         const [contactsList, templatesList] = await Promise.all([
           getBroadcastContacts(),
           getBroadcastTemplates(),
@@ -202,7 +208,11 @@ export default function BroadcastPage() {
 
   useEffect(() => {
     if (!mounted || !isLoggedIn()) return;
-    const socket = io(WS_BASE, { transports: ['websocket', 'polling'] });
+    const token = typeof window !== 'undefined' ? localStorage.getItem('chatcontrol_token') : null;
+    const socket = io(WS_BASE, {
+      transports: ['websocket', 'polling'],
+      auth: { token: token || '' },
+    });
     socketRef.current = socket;
     socket.on('broadcast_started', (payload: { total: number }) => {
       setProgressTotal(payload.total);
@@ -374,6 +384,19 @@ export default function BroadcastPage() {
                   <SettingsIcon />
                   Config
                 </Link>
+                {myRole === 'ORG_ADMIN' && (
+                  <>
+                    <Link href="/org/integrations" className={styles.navUserOption} role="menuitem" onClick={() => setUserMenuOpen(false)}>
+                      Integraciones API
+                    </Link>
+                    <Link href="/org/users" className={styles.navUserOption} role="menuitem" onClick={() => setUserMenuOpen(false)}>
+                      Usuarios
+                    </Link>
+                    <Link href="/org/audit" className={styles.navUserOption} role="menuitem" onClick={() => setUserMenuOpen(false)}>
+                      Auditoría envíos
+                    </Link>
+                  </>
+                )}
                 <button type="button" className={`${styles.navUserOption} ${styles.navUserOptionLogout}`} role="menuitem" onClick={() => { setUserMenuOpen(false); handleLogout(); }}>
                   <LogoutIcon />
                   Cerrar sesión

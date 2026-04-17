@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { PrismaService } from '../prisma/prisma.service';
+import { SecretsCryptoService } from '../common/secrets-crypto.service';
 import { SettingsService } from '../settings/settings.service';
 
 export interface AiGenerateResult {
@@ -8,31 +10,44 @@ export interface AiGenerateResult {
   usedFallbackModel?: boolean;
 }
 
-/**
- * Servicio de IA con Gemini.
- * Usa el modelo configurado en Settings; si falla (ej. modelo de pago sin suscripción), recurre a gemini-2.5-flash.
- */
 @Injectable()
 export class AiService {
-  private readonly genAI: GoogleGenerativeAI | null = null;
-
   constructor(
     private readonly config: ConfigService,
     private readonly settings: SettingsService,
-  ) {
-    const apiKey = this.config.get<string>('GEMINI_API_KEY');
-    if (apiKey) this.genAI = new GoogleGenerativeAI(apiKey);
+    private readonly prisma: PrismaService,
+    private readonly crypto: SecretsCryptoService,
+  ) {}
+
+  private async getApiKeyForOrg(organizationId: string): Promise<string> {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      include: { credentials: true },
+    });
+    if (org?.credentials?.geminiApiKeyEnc) {
+      try {
+        const k = this.crypto.decrypt(org.credentials.geminiApiKeyEnc);
+        if (k.trim()) return k.trim();
+      } catch {
+        /* fall through */
+      }
+    }
+    const envKey = this.config.get<string>('GEMINI_API_KEY', '')?.trim();
+    return envKey || '';
   }
 
-  /**
-   * Genera una respuesta de agente a partir del contexto reciente del chat.
-   * Usa el modelo configurado; si falla, recurre a gemini-2.5-flash y devuelve usedFallbackModel: true.
-   */
-  async generateReply(context: string): Promise<AiGenerateResult> {
-    if (!this.genAI) {
-      throw new Error('GEMINI_API_KEY no configurada. Configurar en .env');
+  private async getGenAI(organizationId: string): Promise<GoogleGenerativeAI | null> {
+    const apiKey = await this.getApiKeyForOrg(organizationId);
+    if (!apiKey) return null;
+    return new GoogleGenerativeAI(apiKey);
+  }
+
+  async generateReply(organizationId: string, context: string): Promise<AiGenerateResult> {
+    const genAI = await this.getGenAI(organizationId);
+    if (!genAI) {
+      throw new Error('API key de Gemini no configurada (integraciones o GEMINI_API_KEY en .env)');
     }
-    const modelId = await this.settings.getGeminiModel();
+    const modelId = await this.settings.getGeminiModel(organizationId);
     const prompt = `Eres un asistente de atención al cliente por WhatsApp. Responde de forma breve, profesional y útil. Solo texto, sin markdown ni emojis innecesarios.
 
 Contexto de la conversación:
@@ -41,7 +56,7 @@ ${context || '(Sin mensajes previos)'}
 Responde como agente (una sola respuesta):`;
 
     const callWithModel = async (mId: string): Promise<string> => {
-      const model = this.genAI!.getGenerativeModel({ model: mId });
+      const model = genAI.getGenerativeModel({ model: mId });
       const result = await model.generateContent(prompt);
       const text = result.response.text?.()?.trim() ?? '';
       return text || 'No pude generar una respuesta. Intenta de nuevo.';
@@ -55,7 +70,7 @@ Responde como agente (una sola respuesta):`;
       if (modelId === fallback) throw err;
       try {
         const text = await callWithModel(fallback);
-        await this.settings.setGeminiModelInUse(fallback);
+        await this.settings.setGeminiModelInUse(organizationId, fallback);
         return { text, usedFallbackModel: true };
       } catch (fallbackErr) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -70,15 +85,12 @@ Responde como agente (una sola respuesta):`;
     }
   }
 
-  /**
-   * Genera un mensaje a partir de una instrucción (ej. para mensajes masivos).
-   * Usa el modelo configurado; si falla, recurre a gemini-2.5-flash.
-   */
-  async generateFromInstruction(instruction: string): Promise<AiGenerateResult> {
-    if (!this.genAI) {
-      throw new Error('GEMINI_API_KEY no configurada. Configurar en .env');
+  async generateFromInstruction(organizationId: string, instruction: string): Promise<AiGenerateResult> {
+    const genAI = await this.getGenAI(organizationId);
+    if (!genAI) {
+      throw new Error('API key de Gemini no configurada (integraciones o GEMINI_API_KEY en .env)');
     }
-    const modelId = await this.settings.getGeminiModel();
+    const modelId = await this.settings.getGeminiModel(organizationId);
     const prompt = `Eres un redactor de mensajes para WhatsApp. Genera UN SOLO mensaje de texto que cumpla la instrucción del usuario.
 
 Reglas:
@@ -91,7 +103,7 @@ Instrucción del usuario: ${instruction?.trim() || 'Escribe un mensaje amigable 
 Mensaje generado:`;
 
     const callWithModel = async (mId: string): Promise<string> => {
-      const model = this.genAI!.getGenerativeModel({ model: mId });
+      const model = genAI.getGenerativeModel({ model: mId });
       const result = await model.generateContent(prompt);
       const text = result.response.text?.()?.trim() ?? '';
       return text || 'No pude generar el mensaje. Intenta con otra instrucción.';
@@ -105,7 +117,7 @@ Mensaje generado:`;
       if (modelId === fallback) throw err;
       try {
         const text = await callWithModel(fallback);
-        await this.settings.setGeminiModelInUse(fallback);
+        await this.settings.setGeminiModelInUse(organizationId, fallback);
         return { text, usedFallbackModel: true };
       } catch {
         throw err;

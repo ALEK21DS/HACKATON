@@ -1,73 +1,212 @@
-:root {
-  --bg: #0f1419;
-  --surface: #1a2332;
-  --surface-hover: #243044;
-  --border: #2d3a4d;
-  --text: #e6edf3;
-  --text-muted: #8b949e;
-  --accent: #58a6ff;
-  --accent-hover: #79b8ff;
-  --danger: #f85149;
-  --success: #3fb950;
-  --warning: #d29922;
+@import "tailwindcss";
+
+@theme {
+  --color-surface-container-low: #1c1b1b;
+  --color-on-error: #690005;
+  --color-primary-fixed: #ffdad7;
+  --color-on-tertiary: #003736;
+  --color-inverse-primary: #b91a24;
+  --color-error-container: #93000a;
+  --color-surface-dim: #131313;
+  --color-on-surface: #F2F2F2;
+  --color-on-primary-container: #5c0008;
+  --color-on-primary: #68000a;
+  --color-surface-container-highest: #353534;
+  --color-surface-tint: #EF4444;
+  --color-primary-container: #EF4444;
+  --color-tertiary-container: #2a2a2a;
+  --color-outline-variant: #404040;
+  --color-on-secondary-container: #F2F2F2;
+  --color-surface-container: #1A1A1A;
+  --color-primary-fixed-dim: #EF4444;
+  --color-surface-container-high: #2a2a2a;
+  --color-secondary-container: #2a2a2a;
+  --color-on-error-container: #ffdad6;
+  --color-on-secondary: #F2F2F2;
+  --color-inverse-on-surface: #1A1A1A;
+  --color-tertiary-fixed-dim: #8C8C8C;
+  --color-on-secondary-fixed: #F2F2F2;
+  --color-tertiary-fixed: #F2F2F2;
+  --color-surface-bright: #3a3939;
+  --color-primary: #EF4444;
+  --color-on-primary-fixed-variant: #930013;
+  --color-error: #EF4444;
+  --color-surface-container-lowest: #0e0e0e;
+  --color-outline: #8C8C8C;
+  --color-on-tertiary-fixed: #0e0e0e;
+  --color-on-surface-variant: #8C8C8C;
+  --color-surface-variant: #353534;
+  --color-on-tertiary-container: #F2F2F2;
+  --color-inverse-surface: #F2F2F2;
+  --color-background: #0A0A0A;
+  --color-on-secondary-fixed-variant: #2a2a2a;
+  --color-on-primary-fixed: #410004;
+  --color-secondary-fixed: #F2F2F2;
+  --color-tertiary: #8C8C8C;
+  --color-on-tertiary-fixed-variant: #404040;
+  --color-secondary: #F2F2F2;
+  --color-on-background: #F2F2F2;
+  --color-surface: #0A0A0A;
+  --color-secondary-fixed-dim: #F2F2F2;
+
+  --font-headline: "Manrope", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-label: "Inter", sans-serif;
 }
 
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
+@layer base {
+  @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&family=Inter:wght@400;500;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL,GRAD,opsz@300,0,0,24..700,1,0,24&display=swap');
+
+  html,
+  body {
+    background-color: #0A0A0A;
+    color: #F2F2F2;
+    font-family: 'Inter', sans-serif;
+  }
 }
 
-html,
-body {
-  max-width: 100vw;
-  min-height: 100vh;
-  background: var(--bg);
-  color: var(--text);
-  font-family: 'Segoe UI', system-ui, sans-serif;
-}
+@layer utilities {
+  .kinetic-gradient {
+    background: linear-gradient(135deg, #ef4444 0%, #b91a24 100%);
+  }
 
-a {
-  color: var(--accent);
-  text-decoration: none;
-}
+  /* Login CTA: gris alineado a inputs (#1A1A1A / #404040); hover revela rojo */
+  .login-submit-btn {
+    position: relative;
+    isolation: isolate;
+    background: linear-gradient(180deg, #222222 0%, #1a1a1a 100%);
+    border: 1px solid rgba(64, 64, 64, 0.45);
+    transition:
+      box-shadow 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+  }
 
-button {
-  cursor: pointer;
-  font: inherit;
-}
+  .login-submit-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(135deg, #ef4444 0%, #b91a24 100%);
+    opacity: 0;
+    transition: opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    z-index: 0;
+    pointer-events: none;
+  }
 
-input,
-textarea {
-  font: inherit;
-}
+  .login-submit-label {
+    position: relative;
+    z-index: 1;
+    transition:
+      transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  }
 
-/* Select/dropdown: flecha y colores integrados con el tema */
-select {
-  appearance: none;
-  -webkit-appearance: none;
-  background-color: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 0.65rem 2rem 0.65rem 1rem;
-  border-radius: 14px;
-  font: inherit;
-  cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.75rem center;
-  background-size: 14px;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-select:hover {
-  border-color: var(--text-muted);
-}
-select:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
-}
-select option {
-  background: var(--surface);
-  color: var(--text);
+  .login-submit-arrow {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+      transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    transform: translateX(-1.25rem);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .login-submit-arrow svg {
+    display: block;
+    margin: 0 auto;
+    color: #fafafa;
+    transition:
+      color 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+      filter 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.25));
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .login-submit-btn:not(:disabled):hover {
+      border-color: rgba(239, 68, 68, 0.45);
+      box-shadow:
+        0 14px 40px rgba(239, 68, 68, 0.28),
+        0 0 0 1px rgba(239, 68, 68, 0.12);
+    }
+
+    .login-submit-btn:not(:disabled):hover::before {
+      opacity: 1;
+    }
+
+    .login-submit-btn:not(:disabled):hover .login-submit-label {
+      transform: translateX(1.85rem);
+      opacity: 0;
+    }
+
+    .login-submit-btn:not(:disabled):hover .login-submit-arrow {
+      transform: translateX(0);
+      opacity: 1;
+    }
+
+    .login-submit-btn:not(:disabled):hover .login-submit-arrow svg {
+      color: #ffffff;
+      filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.45)) drop-shadow(0 0 2px rgba(254, 226, 226, 0.9));
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .login-submit-btn,
+    .login-submit-btn::before {
+      transition: none;
+    }
+
+    .login-submit-label,
+    .login-submit-arrow,
+    .login-submit-arrow svg {
+      transition: none;
+    }
+
+    .login-submit-btn:not(:disabled):hover .login-submit-label {
+      transform: none;
+      opacity: 1;
+    }
+
+    .login-submit-btn:not(:disabled):hover .login-submit-arrow {
+      transform: none;
+      opacity: 0;
+    }
+
+    .login-submit-btn:not(:disabled):hover::before {
+      opacity: 0.65;
+    }
+
+    .login-submit-btn:not(:disabled):hover .login-submit-arrow svg {
+      filter: none;
+    }
+  }
+  .glass-panel {
+    background: rgba(14, 14, 14, 0.8);
+    backdrop-filter: blur(24px);
+  }
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+  }
+  .brand-text {
+    letter-spacing: -0.05em;
+  }
+  
+  /* Fallback viewport container using robust min-height logic */
+  .viewport-container {
+    width: 100%;
+    min-height: 100vh;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    background: #0A0A0A;
+  }
 }

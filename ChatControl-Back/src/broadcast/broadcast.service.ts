@@ -4,7 +4,7 @@ import { MessageDirection, MessageStatus, MessageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatService } from '../chat/chat.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
-import { AiService, type AiGenerateResult } from '../ai/ai.service';
+import { AiService } from '../ai/ai.service';
 import { SettingsService } from '../settings/settings.service';
 import { TemplatesService } from '../templates/templates.service';
 import { ChatGateway } from '../chat/chat.gateway';
@@ -19,11 +19,9 @@ export interface BroadcastContact {
   windowSecondsRemaining: number;
   lastMessagePreview: string;
   lastMessageAt: number;
-  /** Solo pruebas: número autorizado en Meta (sandbox). TODO: eliminar en producción. */
   isSandboxAuthorized: boolean;
 }
 
-/** Plantilla para mensajes masivos (desde BD). */
 export interface BroadcastTemplate {
   id: string;
   name: string;
@@ -44,9 +42,11 @@ export class BroadcastService {
     private readonly config: ConfigService,
   ) {}
 
-  /** Lista contactos para broadcast: todos los contactos con estado 24h. Crea conversación si no existe. */
-  async getContacts(): Promise<BroadcastContact[]> {
-    const allContacts = await this.prisma.contact.findMany({ orderBy: { createdAt: 'desc' } });
+  async getContacts(organizationId: string): Promise<BroadcastContact[]> {
+    const allContacts = await this.prisma.contact.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: 'desc' },
+    });
     for (const contact of allContacts) {
       const existing = await this.prisma.conversation.findFirst({
         where: { contactId: contact.id },
@@ -57,7 +57,7 @@ export class BroadcastService {
         });
       }
     }
-    const list = await this.chat.getConversationsWithWindowStatus();
+    const list = await this.chat.getConversationsWithWindowStatus(organizationId);
     return list.map((c) => ({
       id: c.id,
       phone: c.phone,
@@ -70,37 +70,32 @@ export class BroadcastService {
     }));
   }
 
-  /** Lista plantillas: primero desde Meta (cuenta WhatsApp Business); si no hay, desde BD. */
-  async getTemplates(): Promise<BroadcastTemplate[]> {
-    const meta = await this.whatsapp.getMessageTemplates();
+  async getTemplates(organizationId: string): Promise<BroadcastTemplate[]> {
+    const meta = await this.whatsapp.getMessageTemplates(organizationId);
     if (meta.length > 0) {
       return meta.map((t) => ({ id: t.id, name: t.name, body: t.body, variables: t.variables }));
     }
-    const list = await this.templates.findAll();
+    const list = await this.templates.findAll(organizationId);
     return list.map((t) => ({ id: t.id, name: t.name, body: t.body, variables: t.variables }));
   }
 
-  /** Genera mensaje con IA a partir de instrucción. No envía; el usuario debe confirmar. */
-  async generateMessage(instruction: string): Promise<AiGenerateResult> {
+  async generateMessage(organizationId: string, instruction: string) {
     if (!instruction?.trim()) {
       throw new BadRequestException('La instrucción no puede estar vacía');
     }
-    return this.ai.generateFromInstruction(instruction.trim());
+    return this.ai.generateFromInstruction(organizationId, instruction.trim());
   }
 
-  /**
-   * Envía mensaje masivo. Valida 24h según tipo:
-   * - manual / ia: solo a contactos dentro de 24h
-   * - template: a todos (dentro o fuera de 24h)
-   */
   async sendBroadcast(params: {
+    organizationId: string;
+    userId: string | null;
     conversationIds: string[];
     type: BroadcastMessageType;
     text: string;
     templateId?: string;
     templateVariables?: Record<string, string>;
   }): Promise<{ sent: number; failed: number; errors: Array<{ conversationId: string; error: string }> }> {
-    const { conversationIds, type, text } = params;
+    const { organizationId, userId, conversationIds, type, text } = params;
     if (!conversationIds?.length) {
       throw new BadRequestException('Selecciona al menos un contacto');
     }
@@ -116,7 +111,7 @@ export class BroadcastService {
     let metaBodyTextForChat = '';
     if (type === 'template' && params.templateId) {
       if (isMetaTemplate) {
-        const metaList = await this.whatsapp.getMessageTemplates();
+        const metaList = await this.whatsapp.getMessageTemplates(organizationId);
         const metaT = metaList.find((t) => t.id === params.templateId);
         if (!metaT) throw new BadRequestException('Plantilla de Meta no encontrada');
         const parsed = this.parseMetaTemplateId(params.templateId);
@@ -132,7 +127,7 @@ export class BroadcastService {
           );
         });
       } else {
-        messageToSend = await this.resolveTemplateBody(params.templateId, params.templateVariables);
+        messageToSend = await this.resolveTemplateBody(organizationId, params.templateId, params.templateVariables);
       }
     } else if (type !== 'template') {
       messageToSend = text.trim();
@@ -145,7 +140,7 @@ export class BroadcastService {
       throw new BadRequestException('El mensaje no puede estar vacío');
     }
 
-    const contacts = await this.getContacts();
+    const contacts = await this.getContacts(organizationId);
     const idSet = new Set(contacts.map((c) => c.id));
     const validIds = conversationIds.filter((id) => idSet.has(id));
     if (validIds.length === 0) {
@@ -153,7 +148,7 @@ export class BroadcastService {
     }
 
     const contactMap = new Map(contacts.map((c) => [c.id, c]));
-    this.gateway.emitBroadcastStarted(validIds.length);
+    this.gateway.emitBroadcastStarted(organizationId, validIds.length);
 
     let sent = 0;
     let failed = 0;
@@ -166,8 +161,13 @@ export class BroadcastService {
       const contact = contactMap.get(conversationId)!;
 
       if (isSandbox && !contact.isSandboxAuthorized) {
-        await this.logBroadcast(conversationId, type, 'failed', 'Número no autorizado en Meta (sandbox)');
-        this.gateway.emitBroadcastMessageFailed(conversationId, i, 'Número no autorizado en Meta (sandbox)');
+        await this.logBroadcast(organizationId, userId, conversationId, type, 'failed', 'Número no autorizado en Meta (sandbox)');
+        this.gateway.emitBroadcastMessageFailed(
+          organizationId,
+          conversationId,
+          i,
+          'Número no autorizado en Meta (sandbox)',
+        );
         failed++;
         errors.push({ conversationId, error: 'Número no autorizado en Meta (sandbox)' });
         continue;
@@ -175,8 +175,8 @@ export class BroadcastService {
 
       if (type === 'manual' || type === 'ia') {
         if (!contact.canSend) {
-          await this.logBroadcast(conversationId, type, 'failed', 'Fuera de ventana de 24 horas');
-          this.gateway.emitBroadcastMessageFailed(conversationId, i, 'Fuera de ventana de 24 horas');
+          await this.logBroadcast(organizationId, userId, conversationId, type, 'failed', 'Fuera de ventana de 24 horas');
+          this.gateway.emitBroadcastMessageFailed(organizationId, conversationId, i, 'Fuera de ventana de 24 horas');
           failed++;
           errors.push({ conversationId, error: 'Fuera de ventana de 24 horas' });
           continue;
@@ -187,6 +187,8 @@ export class BroadcastService {
         if (type === 'template') {
           if (isMetaTemplate) {
             await this.sendMetaTemplateToConversation(
+              organizationId,
+              userId,
               conversationId,
               metaTemplateName,
               metaTemplateLanguage,
@@ -194,22 +196,24 @@ export class BroadcastService {
               metaBodyTextForChat,
             );
           } else {
-            await this.sendTemplateToConversation(conversationId, messageToSend);
+            await this.sendTemplateToConversation(organizationId, userId, conversationId, messageToSend);
           }
         } else {
           await this.chat.sendMessage({
+            organizationId,
             conversationId,
             text: messageToSend,
             fromAi: type === 'ia',
+            sentByUserId: userId,
           });
         }
-        await this.logBroadcast(conversationId, type, 'sent');
-        this.gateway.emitBroadcastMessageSent(conversationId, i);
+        await this.logBroadcast(organizationId, userId, conversationId, type, 'sent');
+        this.gateway.emitBroadcastMessageSent(organizationId, conversationId, i);
         sent++;
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        await this.logBroadcast(conversationId, type, 'failed', errorMessage);
-        this.gateway.emitBroadcastMessageFailed(conversationId, i, errorMessage);
+        await this.logBroadcast(organizationId, userId, conversationId, type, 'failed', errorMessage);
+        this.gateway.emitBroadcastMessageFailed(organizationId, conversationId, i, errorMessage);
         failed++;
         errors.push({ conversationId, error: errorMessage });
       }
@@ -218,7 +222,6 @@ export class BroadcastService {
     return { sent, failed, errors };
   }
 
-  /** Parsea id "meta_{name}_{language}" para extraer name y language (language puede ser en_US). */
   private parseMetaTemplateId(id: string): { name: string; language: string } | null {
     if (!id.startsWith('meta_')) return null;
     const parts = id.slice(5).split('_');
@@ -235,8 +238,12 @@ export class BroadcastService {
     };
   }
 
-  private async resolveTemplateBody(templateId: string, variables?: Record<string, string>): Promise<string> {
-    const t = await this.templates.findOne(templateId);
+  private async resolveTemplateBody(
+    organizationId: string,
+    templateId: string,
+    variables?: Record<string, string>,
+  ): Promise<string> {
+    const t = await this.templates.findOne(organizationId, templateId);
     if (!t) return '';
     let body = t.body;
     (t.variables || []).forEach((key) => {
@@ -247,23 +254,28 @@ export class BroadcastService {
   }
 
   private async sendMetaTemplateToConversation(
+    organizationId: string,
+    userId: string | null,
     conversationId: string,
     templateName: string,
     language: string,
     bodyParams: string[],
     bodyTextForChat: string,
   ): Promise<void> {
-    await this.settings.checkDailyLimitOrThrow(conversationId);
-    const conv = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
+    await this.settings.checkDailyLimitOrThrow(conversationId, organizationId);
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, contact: { organizationId } },
       include: { contact: true },
     });
     if (!conv) throw new BadRequestException('Conversación no encontrada');
     const isSandbox = this.config.get<string>('WHATSAPP_SANDBOX', 'true') === 'true';
     if (isSandbox && !conv.contact.isSandboxAuthorized) {
-      throw new BadRequestException('Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.');
+      throw new BadRequestException(
+        'Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.',
+      );
     }
     const { messageId } = await this.whatsapp.sendTemplateMessage(
+      organizationId,
       conv.contact.phone,
       templateName,
       language,
@@ -281,9 +293,10 @@ export class BroadcastService {
         whatsappMessageId: messageId,
         whatsappTimestamp: now,
         fromAi: false,
+        sentByUserId: userId,
       },
     });
-    this.gateway.emitNewMessage(conversationId, {
+    this.gateway.emitNewMessage(organizationId, conversationId, {
       id: created.id,
       conversationId,
       fromUser: false,
@@ -292,20 +305,27 @@ export class BroadcastService {
     });
   }
 
-  private async sendTemplateToConversation(conversationId: string, text: string): Promise<void> {
-    await this.settings.checkDailyLimitOrThrow(conversationId);
-    const conv = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
+  private async sendTemplateToConversation(
+    organizationId: string,
+    userId: string | null,
+    conversationId: string,
+    text: string,
+  ): Promise<void> {
+    await this.settings.checkDailyLimitOrThrow(conversationId, organizationId);
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, contact: { organizationId } },
       include: { contact: true },
     });
     if (!conv) throw new BadRequestException('Conversación no encontrada');
     const isSandbox = this.config.get<string>('WHATSAPP_SANDBOX', 'true') === 'true';
     if (isSandbox && !conv.contact.isSandboxAuthorized) {
-      throw new BadRequestException('Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.');
+      throw new BadRequestException(
+        'Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.',
+      );
     }
-    const { messageId } = await this.whatsapp.sendTextMessageRaw(conv.contact.phone, text);
+    const { messageId } = await this.whatsapp.sendTextMessageRaw(organizationId, conv.contact.phone, text);
     const now = new Date();
-    await this.prisma.message.create({
+    const created = await this.prisma.message.create({
       data: {
         conversationId,
         direction: MessageDirection.OUT,
@@ -315,10 +335,11 @@ export class BroadcastService {
         whatsappMessageId: messageId,
         whatsappTimestamp: now,
         fromAi: false,
+        sentByUserId: userId,
       },
     });
-    this.gateway.emitNewMessage(conversationId, {
-      id: messageId,
+    this.gateway.emitNewMessage(organizationId, conversationId, {
+      id: created.id,
       conversationId,
       fromUser: false,
       text,
@@ -327,6 +348,8 @@ export class BroadcastService {
   }
 
   private async logBroadcast(
+    organizationId: string,
+    userId: string | null,
     conversationId: string,
     type: BroadcastMessageType,
     status: 'sent' | 'failed',
@@ -334,6 +357,8 @@ export class BroadcastService {
   ): Promise<void> {
     await this.prisma.broadcastLog.create({
       data: {
+        organizationId,
+        userId,
         conversationId,
         type,
         status,

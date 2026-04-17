@@ -5,9 +5,9 @@ export const metadata: Metadata = {
   title: 'ChatControl - Chat profesional',
   description: 'Sistema de chat con WhatsApp e IA',
   icons: {
-    icon: '/assets/images/logo-mensaje.png',
-    apple: '/assets/images/logo-mensaje.png',
-  },
+    icon: '/assets/images/NOIRLINE2.png',
+    apple: '/assets/images/NOIRLINE2.png',
+  }
 };
 
 export default function RootLayout({

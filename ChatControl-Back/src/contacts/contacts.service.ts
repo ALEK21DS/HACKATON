@@ -1,7 +1,6 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
-/** Contacto para listado y formulario. TODO: eliminar isSandboxAuthorized en producción. */
 export interface ContactDto {
   id: string;
   phone: string;
@@ -18,8 +17,9 @@ function normalizePhone(phone: string): string {
 export class ContactsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(): Promise<ContactDto[]> {
+  async findAll(organizationId: string): Promise<ContactDto[]> {
     const list = await this.prisma.contact.findMany({
+      where: { organizationId },
       orderBy: { createdAt: 'desc' },
     });
     return list.map((c) => ({
@@ -31,31 +31,31 @@ export class ContactsService {
     }));
   }
 
-  /**
-   * Crea o actualiza contacto por número (upsert).
-   * Solo pruebas: isSandboxAuthorized indica si el número está autorizado en Meta.
-   * TODO: eliminar isSandboxAuthorized en producción.
-   */
-  async createOrUpdate(params: {
-    phone: string;
-    name?: string;
-    isSandboxAuthorized?: boolean;
-  }): Promise<ContactDto> {
+  async createOrUpdate(
+    organizationId: string,
+    params: {
+      phone: string;
+      name?: string;
+      isSandboxAuthorized?: boolean;
+    },
+  ): Promise<ContactDto> {
     const phone = normalizePhone(params.phone);
     if (!phone) throw new BadRequestException('El número no puede estar vacío');
     const contact = await this.prisma.contact.upsert({
-      where: { phone },
+      where: {
+        organizationId_phone: { organizationId, phone },
+      },
       create: {
+        organizationId,
         phone,
         name: params.name?.trim() || null,
         isSandboxAuthorized: params.isSandboxAuthorized ?? false,
       },
       update: {
-        name: params.name !== undefined ? (params.name?.trim() || null) : undefined,
+        name: params.name !== undefined ? params.name?.trim() || null : undefined,
         isSandboxAuthorized: params.isSandboxAuthorized ?? undefined,
       },
     });
-    // Crear una conversación inicial si no existe (para que aparezca en Mensajes Masivos)
     const existing = await this.prisma.conversation.findFirst({
       where: { contactId: contact.id },
     });
@@ -74,13 +74,18 @@ export class ContactsService {
   }
 
   async update(
+    organizationId: string,
     id: string,
     params: { name?: string; isSandboxAuthorized?: boolean },
   ): Promise<ContactDto> {
+    const existing = await this.prisma.contact.findFirst({
+      where: { id, organizationId },
+    });
+    if (!existing) throw new NotFoundException('Contacto no encontrado');
     const contact = await this.prisma.contact.update({
       where: { id },
       data: {
-        name: params.name !== undefined ? (params.name?.trim() || null) : undefined,
+        name: params.name !== undefined ? params.name?.trim() || null : undefined,
         isSandboxAuthorized: params.isSandboxAuthorized ?? undefined,
       },
     });
@@ -93,9 +98,9 @@ export class ContactsService {
     };
   }
 
-  async findOne(id: string): Promise<ContactDto | null> {
-    const contact = await this.prisma.contact.findUnique({
-      where: { id },
+  async findOne(organizationId: string, id: string): Promise<ContactDto | null> {
+    const contact = await this.prisma.contact.findFirst({
+      where: { id, organizationId },
     });
     if (!contact) return null;
     return {

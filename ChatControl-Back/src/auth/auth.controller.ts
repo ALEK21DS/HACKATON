@@ -1,8 +1,28 @@
-import { Body, Controller, Post, UsePipes, ValidationPipe } from '@nestjs/common';
-import { AuthService, LoginDto } from './auth.service';
-import { IsNotEmpty, IsString, MinLength } from 'class-validator';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  UseGuards,
+  UsePipes,
+  ValidationPipe,
+} from '@nestjs/common';
+import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { CurrentUser } from './decorators/current-user.decorator';
+import type { AuthUser } from './auth.types';
 
-class LoginBodyDto implements LoginDto {
+class LoginBodyDto {
+  @IsEmail()
+  email!: string;
+
+  @IsString()
+  @MinLength(1)
+  password!: string;
+}
+
+class LegacyLoginBodyDto {
   @IsString()
   @IsNotEmpty()
   phone!: string;
@@ -19,6 +39,25 @@ export class AuthController {
   @Post('login')
   @UsePipes(new ValidationPipe({ whitelist: true }))
   async login(@Body() dto: LoginBodyDto) {
-    return this.authService.login(dto);
+    return this.authService.login({
+      email: dto.email,
+      password: dto.password,
+    });
+  }
+
+  /** Compatibilidad MVP: teléfono + APP_LOGIN_PASSWORD → usuario legacy en seed */
+  @Post('login-legacy')
+  @UsePipes(new ValidationPipe({ whitelist: true }))
+  async loginLegacy(@Body() dto: LegacyLoginBodyDto) {
+    return this.authService.loginLegacy({
+      phone: dto.phone,
+      password: dto.password,
+    });
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  async me(@CurrentUser() user: AuthUser) {
+    return this.authService.getMe(user.userId);
   }
 }

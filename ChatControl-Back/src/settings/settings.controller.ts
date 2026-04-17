@@ -1,42 +1,56 @@
 import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthUser } from '../auth/auth.types';
+import { OrgMemberGuard } from '../auth/org-member.guard';
 import { SettingsService, type WhatsappTier } from './settings.service';
 
 @Controller('settings')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, OrgMemberGuard, RolesGuard)
+@Roles(UserRole.ORG_ADMIN, UserRole.AGENT)
 export class SettingsController {
   constructor(private readonly settings: SettingsService) {}
 
-  @Get()
-  async get() {
+  private async buildResponse(organizationId: string) {
     const [whatsappTier, dailyLimit, geminiModel, geminiModelInUse] = await Promise.all([
-      this.settings.getWhatsappTier(),
-      this.settings.getDailyLimit(),
-      this.settings.getGeminiModel(),
-      this.settings.getGeminiModelInUse(),
+      this.settings.getWhatsappTier(organizationId),
+      this.settings.getDailyLimit(organizationId),
+      this.settings.getGeminiModel(organizationId),
+      this.settings.getGeminiModelInUse(organizationId),
     ]);
     return {
       whatsappTier,
-      dailyLimit: dailyLimit === Number.MAX_SAFE_INTEGER ? null : dailyLimit, // null = ilimitado
+      dailyLimit: dailyLimit === Number.MAX_SAFE_INTEGER ? null : dailyLimit,
       geminiModel,
       geminiModelInUse,
     };
   }
 
+  @Get()
+  async get(@CurrentUser() user: AuthUser) {
+    return this.buildResponse(user.organizationId!);
+  }
+
   @Patch()
+  @Roles(UserRole.ORG_ADMIN)
   async update(
+    @CurrentUser() user: AuthUser,
     @Body()
     body: {
       whatsappTier?: WhatsappTier;
       geminiModel?: string;
     },
   ) {
+    const orgId = user.organizationId!;
     if (body.whatsappTier !== undefined) {
-      await this.settings.setWhatsappTier(body.whatsappTier);
+      await this.settings.setWhatsappTier(orgId, body.whatsappTier);
     }
     if (body.geminiModel !== undefined) {
-      await this.settings.setGeminiModel(body.geminiModel.trim());
+      await this.settings.setGeminiModel(orgId, body.geminiModel.trim());
     }
-    return this.get();
+    return this.buildResponse(orgId);
   }
 }

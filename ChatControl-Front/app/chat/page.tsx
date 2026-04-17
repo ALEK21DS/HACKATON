@@ -7,6 +7,7 @@ import Image from 'next/image';
 import { io, Socket } from 'socket.io-client';
 import {
   isLoggedIn,
+  getMe,
   getConversations,
   getMessages,
   getConversation,
@@ -17,6 +18,7 @@ import {
   type Conversation,
   type Message,
   type NewMessagePayload,
+  type UserRole,
 } from '@/lib/api';
 import styles from './chat.module.css';
 import { formatPhoneDisplay } from '@/lib/format';
@@ -125,8 +127,14 @@ export default function ChatPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [myRole, setMyRole] = useState<UserRole | null>(null);
+  const [peerPresence, setPeerPresence] = useState<Record<string, string>>({});
+  const [typingHint, setTypingHint] = useState('');
   const socketRef = useRef<Socket | null>(null);
   const selectedIdRef = useRef<string | null>(null);
+  const myUserIdRef = useRef<string | null>(null);
+  const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   selectedIdRef.current = selectedId;
@@ -179,20 +187,43 @@ export default function ChatPage() {
       router.replace('/login');
       return;
     }
+    getMe()
+      .then((m) => {
+        myUserIdRef.current = m.id;
+        setMyRole(m.role);
+      })
+      .catch(() => {});
     loadConversations();
   }, [mounted, router]);
+
+  useEffect(() => {
+    const s = socketRef.current;
+    if (!s || !selectedId) {
+      setPeerPresence({});
+      setTypingHint('');
+      return;
+    }
+    s.emit('join_conversation', { conversationId: selectedId });
+    return () => {
+      s.emit('leave_conversation', { conversationId: selectedId });
+      setPeerPresence({});
+      setTypingHint('');
+    };
+  }, [selectedId]);
 
   // WebSocket: conectar al abrir la vista del chat y escuchar new_message (sin polling)
   useEffect(() => {
     if (!mounted || !isLoggedIn()) return;
-    const socket = io(WS_BASE, { transports: ['websocket', 'polling'] });
+    const token = typeof window !== 'undefined' ? localStorage.getItem('chatcontrol_token') : null;
+    const socket = io(WS_BASE, {
+      transports: ['websocket', 'polling'],
+      auth: { token: token || '' },
+    });
     socketRef.current = socket;
 
     socket.on('new_message', (payload: NewMessagePayload) => {
-      // Actualizar lista de conversaciones (preview y orden)
       getConversations().then((list) => setConversations(list)).catch(() => {});
       const currentSelectedId = selectedIdRef.current;
-      // Si el mensaje es de la conversación abierta, añadirlo al estado sin recargar
       setMessages((prev) => {
         if (payload.conversationId !== currentSelectedId) return prev;
         if (prev.some((m) => m.id === payload.message.id)) return prev;
@@ -206,7 +237,38 @@ export default function ChatPage() {
       }
     });
 
+    socket.on(
+      'presence',
+      (p: { conversationId: string; userId: string; displayName: string; state: 'in_chat' | 'left' }) => {
+        if (p.userId === myUserIdRef.current) return;
+        if (p.conversationId !== selectedIdRef.current) return;
+        setPeerPresence((prev) => {
+          const next = { ...prev };
+          if (p.state === 'in_chat') next[p.userId] = p.displayName;
+          else delete next[p.userId];
+          return next;
+        });
+      },
+    );
+
+    socket.on(
+      'typing',
+      (p: { conversationId: string; userId: string; displayName: string; typing: boolean }) => {
+        if (p.userId === myUserIdRef.current) return;
+        if (p.conversationId !== selectedIdRef.current) return;
+        if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+        if (!p.typing) {
+          setTypingHint('');
+          return;
+        }
+        setTypingHint(`${p.displayName} está escribiendo…`);
+        typingStopTimerRef.current = setTimeout(() => setTypingHint(''), 2800);
+      },
+    );
+
     return () => {
+      if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+      if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
       socket.disconnect();
       socketRef.current = null;
     };
@@ -282,6 +344,8 @@ export default function ChatPage() {
 
   async function handleSend(text: string) {
     if (!selectedId || !text.trim() || sending || !canSend) return;
+    const cid = selectedId;
+    socketRef.current?.emit('typing_stop', { conversationId: cid });
     setSending(true);
     setError('');
     setToast('');
@@ -355,6 +419,23 @@ export default function ChatPage() {
     router.replace('/login');
   }
 
+  const presenceLine =
+    Object.keys(peerPresence).length > 0
+      ? `${Object.values(peerPresence).join(', ')} ${Object.keys(peerPresence).length === 1 ? 'también está' : 'también están'} en esta conversación`
+      : '';
+
+  function bumpTyping() {
+    const s = socketRef.current;
+    const id = selectedIdRef.current;
+    if (!s || !id) return;
+    s.emit('typing_start', { conversationId: id });
+    if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+    typingIdleTimerRef.current = setTimeout(() => {
+      const cid = selectedIdRef.current;
+      if (cid) socketRef.current?.emit('typing_stop', { conversationId: cid });
+    }, 1200);
+  }
+
   // Mismo HTML en servidor y primer render en cliente para evitar error de hidratación
   if (!mounted) {
     return (
@@ -414,6 +495,19 @@ export default function ChatPage() {
                   <SettingsIcon />
                   Config
                 </Link>
+                {myRole === 'ORG_ADMIN' && (
+                  <>
+                    <Link href="/org/integrations" className={styles.navUserOption} role="menuitem" onClick={() => setUserMenuOpen(false)}>
+                      Integraciones API
+                    </Link>
+                    <Link href="/org/users" className={styles.navUserOption} role="menuitem" onClick={() => setUserMenuOpen(false)}>
+                      Usuarios
+                    </Link>
+                    <Link href="/org/audit" className={styles.navUserOption} role="menuitem" onClick={() => setUserMenuOpen(false)}>
+                      Auditoría envíos
+                    </Link>
+                  </>
+                )}
                 <button type="button" className={`${styles.navUserOption} ${styles.navUserOptionLogout}`} role="menuitem" onClick={() => { setUserMenuOpen(false); handleLogout(); }}>
                   <LogoutIcon />
                   Cerrar sesión
@@ -514,6 +608,22 @@ export default function ChatPage() {
                 </div>
               </div>
             </header>
+            {(presenceLine || typingHint) && (
+              <p
+                style={{
+                  margin: '0 1rem 0.5rem',
+                  padding: '0.45rem 0.65rem',
+                  fontSize: '0.85rem',
+                  color: '#444',
+                  background: 'rgba(0,0,0,0.04)',
+                  borderRadius: 8,
+                }}
+              >
+                {presenceLine}
+                {presenceLine && typingHint ? ' · ' : ''}
+                <em style={{ fontStyle: 'normal', color: '#1565c0' }}>{typingHint}</em>
+              </p>
+            )}
             {toast && (
               <p className={styles.badgeOk} style={{ margin: '0 1rem 0.5rem', padding: '0.5rem 0.75rem', borderRadius: 8 }}>
                 {toast}
@@ -584,7 +694,10 @@ export default function ChatPage() {
               <div className={styles.replyRow}>
                 <textarea
                   value={replyInput}
-                  onChange={(e) => setReplyInput(e.target.value)}
+                  onChange={(e) => {
+                    setReplyInput(e.target.value);
+                    bumpTyping();
+                  }}
                   placeholder={generatedText ? 'Escribe o edita la respuesta...' : 'Escribe un mensaje manual...'}
                   className={styles.textarea}
                   rows={3}

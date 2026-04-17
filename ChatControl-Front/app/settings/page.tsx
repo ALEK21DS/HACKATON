@@ -9,8 +9,10 @@ import {
   logout,
   getSettings,
   updateSettings,
+  getMe,
   type SettingsData,
   type WhatsappTier,
+  type UserRole,
 } from '@/lib/api';
 import styles from '../chat/chat.module.css';
 import broadcastStyles from '../broadcast/broadcast.module.css';
@@ -102,6 +104,7 @@ export default function SettingsPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [myRole, setMyRole] = useState<UserRole | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -142,6 +145,8 @@ export default function SettingsPage() {
       setLoading(true);
       setError('');
       try {
+        const profile = await getMe();
+        setMyRole(profile.role);
         const data = await getSettings();
         setSettings(data);
         setWhatsappTier(data.whatsappTier);
@@ -232,6 +237,19 @@ export default function SettingsPage() {
                   <SettingsIcon />
                   Config
                 </Link>
+                {myRole === 'ORG_ADMIN' && (
+                  <>
+                    <Link href="/org/integrations" className={styles.navUserOption} role="menuitem" onClick={() => setUserMenuOpen(false)}>
+                      Integraciones API
+                    </Link>
+                    <Link href="/org/users" className={styles.navUserOption} role="menuitem" onClick={() => setUserMenuOpen(false)}>
+                      Usuarios
+                    </Link>
+                    <Link href="/org/audit" className={styles.navUserOption} role="menuitem" onClick={() => setUserMenuOpen(false)}>
+                      Auditoría envíos
+                    </Link>
+                  </>
+                )}
                 <button type="button" className={`${styles.navUserOption} ${styles.navUserOptionLogout}`} role="menuitem" onClick={() => { setUserMenuOpen(false); handleLogout(); }}>
                   <LogoutIcon />
                   Cerrar sesión

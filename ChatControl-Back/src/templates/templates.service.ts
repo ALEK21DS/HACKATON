@@ -1,7 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
-/** Extrae nombres de variables del cuerpo (ej. {{nombre}} -> ['nombre']) */
 function extractVariables(body: string): string[] {
   const matches = body.matchAll(/\{\{\s*(\w+)\s*\}\}/g);
   const vars = new Set<string>();
@@ -22,8 +21,9 @@ export interface TemplateDto {
 export class TemplatesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(): Promise<TemplateDto[]> {
+  async findAll(organizationId: string): Promise<TemplateDto[]> {
     const list = await this.prisma.template.findMany({
+      where: { organizationId },
       orderBy: { name: 'asc' },
     });
     return list.map((t) => ({
@@ -36,9 +36,9 @@ export class TemplatesService {
     }));
   }
 
-  async findOne(id: string): Promise<TemplateDto | null> {
-    const t = await this.prisma.template.findUnique({
-      where: { id },
+  async findOne(organizationId: string, id: string): Promise<TemplateDto | null> {
+    const t = await this.prisma.template.findFirst({
+      where: { id, organizationId },
     });
     if (!t) return null;
     return {
@@ -51,14 +51,14 @@ export class TemplatesService {
     };
   }
 
-  async create(params: { name: string; body: string }): Promise<TemplateDto> {
+  async create(organizationId: string, params: { name: string; body: string }): Promise<TemplateDto> {
     const name = params.name?.trim();
     const body = params.body?.trim();
     if (!name) throw new BadRequestException('El nombre no puede estar vacío');
     if (!body) throw new BadRequestException('El cuerpo de la plantilla no puede estar vacío');
     const variables = extractVariables(body);
     const t = await this.prisma.template.create({
-      data: { name, body, variables },
+      data: { organizationId, name, body, variables },
     });
     return {
       id: t.id,
@@ -71,10 +71,13 @@ export class TemplatesService {
   }
 
   async update(
+    organizationId: string,
     id: string,
     params: { name?: string; body?: string },
   ): Promise<TemplateDto> {
-    const existing = await this.prisma.template.findUnique({ where: { id } });
+    const existing = await this.prisma.template.findFirst({
+      where: { id, organizationId },
+    });
     if (!existing) throw new NotFoundException('Plantilla no encontrada');
     const name = params.name !== undefined ? params.name.trim() : undefined;
     const body = params.body !== undefined ? params.body.trim() : undefined;
@@ -99,8 +102,10 @@ export class TemplatesService {
     };
   }
 
-  async remove(id: string): Promise<void> {
-    const existing = await this.prisma.template.findUnique({ where: { id } });
+  async remove(organizationId: string, id: string): Promise<void> {
+    const existing = await this.prisma.template.findFirst({
+      where: { id, organizationId },
+    });
     if (!existing) throw new NotFoundException('Plantilla no encontrada');
     await this.prisma.template.delete({ where: { id } });
   }

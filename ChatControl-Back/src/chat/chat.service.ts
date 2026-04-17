@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MessageDirection, MessageStatus, MessageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,12 +21,10 @@ export interface Conversation {
   id: string;
   phone: string;
   name?: string;
-  /** Solo pruebas: si el número está autorizado en Meta (sandbox). TODO: eliminar en producción. */
   isSandboxAuthorized?: boolean;
   lastUserMessageAt: number | null;
   lastMessagePreview: string;
   lastMessageAt: number;
-  /** Número de mensajes entrantes no leídos (después de lastReadAt). */
   unreadCount: number;
 }
 
@@ -46,8 +44,8 @@ export class ChatService {
     private readonly config: ConfigService,
   ) {}
 
-  /** Registra mensaje entrante desde el webhook de WhatsApp */
   async registerIncomingMessage(payload: {
+    organizationId: string;
     from: string;
     messageId: string;
     timestamp: number;
@@ -55,8 +53,13 @@ export class ChatService {
   }): Promise<void> {
     const phone = normalizePhone(payload.from);
     const contact = await this.prisma.contact.upsert({
-      where: { phone },
-      create: { phone },
+      where: {
+        organizationId_phone: {
+          organizationId: payload.organizationId,
+          phone,
+        },
+      },
+      create: { organizationId: payload.organizationId, phone },
       update: {},
     });
     let conversation = await this.prisma.conversation.findFirst({
@@ -89,18 +92,30 @@ export class ChatService {
       },
       update: {},
     });
-    // Notificar en tiempo real al frontend (elimina necesidad de polling)
-    this.chatGateway.emitNewMessage(conversation.id, {
-      id: payload.messageId,
-      conversationId: conversation.id,
-      fromUser: true,
-      text: payload.text,
-      timestamp: payload.timestamp,
-    });
+    this.chatGateway.emitNewMessage(
+      payload.organizationId,
+      conversation.id,
+      {
+        id: payload.messageId,
+        conversationId: conversation.id,
+        fromUser: true,
+        text: payload.text,
+        timestamp: payload.timestamp,
+      },
+    );
   }
 
-  async getConversations(): Promise<Conversation[]> {
+  private async assertConversationInOrg(conversationId: string, organizationId: string): Promise<void> {
+    const c = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, contact: { organizationId } },
+      select: { id: true },
+    });
+    if (!c) throw new NotFoundException('Conversación no encontrada');
+  }
+
+  async getConversations(organizationId: string): Promise<Conversation[]> {
     const list = await this.prisma.conversation.findMany({
+      where: { contact: { organizationId } },
       include: {
         contact: true,
         messages: {
@@ -129,7 +144,6 @@ export class ChatService {
     return withUnread.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
   }
 
-  /** Cuenta mensajes entrantes (IN) con timestamp mayor que lastReadAt. */
   private async getUnreadCount(conversationId: string): Promise<number> {
     const conv = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
@@ -145,26 +159,23 @@ export class ChatService {
     });
   }
 
-  async markConversationAsRead(conversationId: string): Promise<void> {
+  async markConversationAsRead(conversationId: string, organizationId: string): Promise<void> {
+    await this.assertConversationInOrg(conversationId, organizationId);
     await this.prisma.conversation.update({
       where: { id: conversationId },
       data: { lastReadAt: new Date() },
     });
   }
 
-  /**
-   * Lista conversaciones con estado de ventana 24h (para mensajes masivos).
-   * Solo contactos que hayan escrito antes (tienen conversación).
-   */
-  async getConversationsWithWindowStatus(): Promise<
-    Array<Conversation & { canSend: boolean; windowSecondsRemaining: number }>
-  > {
-    const list = await this.getConversations();
+  async getConversationsWithWindowStatus(
+    organizationId: string,
+  ): Promise<Array<Conversation & { canSend: boolean; windowSecondsRemaining: number }>> {
+    const list = await this.getConversations(organizationId);
     const result = await Promise.all(
       list.map(async (c) => {
         const [canSend, windowSecondsRemaining] = await Promise.all([
-          this.canSendToConversation(c.id),
-          this.getWindowSecondsRemaining(c.id),
+          this.canSendToConversation(c.id, organizationId),
+          this.getWindowSecondsRemaining(c.id, organizationId),
         ]);
         return { ...c, canSend, windowSecondsRemaining };
       }),
@@ -172,7 +183,8 @@ export class ChatService {
     return result;
   }
 
-  async getMessages(conversationId: string): Promise<Message[]> {
+  async getMessages(conversationId: string, organizationId: string): Promise<Message[]> {
+    await this.assertConversationInOrg(conversationId, organizationId);
     const rows = await this.prisma.message.findMany({
       where: { conversationId },
       orderBy: { whatsappTimestamp: 'asc' },
@@ -187,9 +199,12 @@ export class ChatService {
     }));
   }
 
-  async getConversation(conversationId: string): Promise<Conversation | undefined> {
-    const c = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
+  async getConversation(
+    conversationId: string,
+    organizationId: string,
+  ): Promise<Conversation | undefined> {
+    const c = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, contact: { organizationId } },
       include: {
         contact: true,
         messages: {
@@ -213,19 +228,19 @@ export class ChatService {
     };
   }
 
-  async canSendToConversation(conversationId: string): Promise<boolean> {
+  async canSendToConversation(conversationId: string, organizationId: string): Promise<boolean> {
+    await this.assertConversationInOrg(conversationId, organizationId);
     const lastAt = await this.getConversationLastUserMessageAt(conversationId);
     return this.window24h.canSendFreeMessage(lastAt);
   }
 
-  async getWindowSecondsRemaining(conversationId: string): Promise<number> {
+  async getWindowSecondsRemaining(conversationId: string, organizationId: string): Promise<number> {
+    await this.assertConversationInOrg(conversationId, organizationId);
     const lastAt = await this.getConversationLastUserMessageAt(conversationId);
     return this.window24h.getSecondsRemaining(lastAt);
   }
 
-  private async getConversationLastUserMessageAt(
-    conversationId: string,
-  ): Promise<Date | null> {
+  private async getConversationLastUserMessageAt(conversationId: string): Promise<Date | null> {
     const c = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
       select: { lastUserMessageAt: true },
@@ -234,25 +249,26 @@ export class ChatService {
   }
 
   async sendMessage(params: {
+    organizationId: string;
     conversationId: string;
     text: string;
     fromAi?: boolean;
+    sentByUserId?: string | null;
   }): Promise<Message> {
-    const conv = await this.prisma.conversation.findUnique({
-      where: { id: params.conversationId },
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id: params.conversationId, contact: { organizationId: params.organizationId } },
       include: { contact: true },
     });
     if (!conv) throw new BadRequestException('Conversación no encontrada');
-    // TODO: eliminar en producción; en producción aplicar reglas reales de WhatsApp
     const isSandbox = this.config.get<string>('WHATSAPP_SANDBOX', 'true') === 'true';
     if (isSandbox && !conv.contact.isSandboxAuthorized) {
-      throw new ForbiddenException('Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.');
+      throw new ForbiddenException(
+        'Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.',
+      );
     }
-    await this.settings.checkDailyLimitOrThrow(params.conversationId);
-    const lastUserMessageAt = conv.lastUserMessageAt
-      ? new Date(conv.lastUserMessageAt)
-      : null;
-    const { messageId } = await this.whatsapp.sendTextMessage({
+    await this.settings.checkDailyLimitOrThrow(params.conversationId, params.organizationId);
+    const lastUserMessageAt = conv.lastUserMessageAt ? new Date(conv.lastUserMessageAt) : null;
+    const { messageId } = await this.whatsapp.sendTextMessage(params.organizationId, {
       to: conv.contact.phone,
       text: params.text,
       lastUserMessageAt,
@@ -268,6 +284,7 @@ export class ChatService {
         whatsappMessageId: messageId,
         whatsappTimestamp: now,
         fromAi: params.fromAi ?? false,
+        sentByUserId: params.sentByUserId ?? null,
       },
     });
     const msg: Message = {
@@ -278,21 +295,20 @@ export class ChatService {
       timestamp: created.whatsappTimestamp.getTime(),
       fromAi: created.fromAi ?? undefined,
     };
-    // Notificar en tiempo real al frontend
-    this.chatGateway.emitNewMessage(params.conversationId, msg);
+    this.chatGateway.emitNewMessage(params.organizationId, params.conversationId, msg);
     return msg;
   }
 
-  async generateAiReply(conversationId: string): Promise<{ text: string; usedFallbackModel?: boolean }> {
-    const conv = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
-    });
-    if (!conv) throw new BadRequestException('Conversación no encontrada');
-    const messages = await this.getMessages(conversationId);
-    const recent = messages.slice(-10).map((m) =>
-      m.fromUser ? `Cliente: ${m.text}` : `Agente: ${m.text}`,
-    );
+  async generateAiReply(
+    organizationId: string,
+    conversationId: string,
+  ): Promise<{ text: string; usedFallbackModel?: boolean }> {
+    await this.assertConversationInOrg(conversationId, organizationId);
+    const messages = await this.getMessages(conversationId, organizationId);
+    const recent = messages
+      .slice(-10)
+      .map((m) => (m.fromUser ? `Cliente: ${m.text}` : `Agente: ${m.text}`));
     const context = recent.join('\n');
-    return this.ai.generateReply(context);
+    return this.ai.generateReply(organizationId, context);
   }
 }
