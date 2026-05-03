@@ -242,4 +242,44 @@ export class WhatsAppService {
     }
     return null;
   }
+
+  /**
+   * Descarga un archivo multimedia desde los servidores de WhatsApp.
+   * Retorna el Buffer y el MimeType.
+   */
+  async downloadMedia(mediaId: string, organizationId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+    const { accessToken } = await this.resolveCredentials(organizationId);
+
+    // 1. Obtener la URL del archivo
+    const metaUrl = `${this.baseUrl}/${mediaId}`;
+    const metaRes = await fetch(metaUrl, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!metaRes.ok) {
+      return null;
+    }
+
+    const metaData = (await metaRes.json()) as { url?: string; mime_type?: string };
+    if (!metaData.url || !metaData.mime_type) {
+      return null;
+    }
+
+    // 2. Descargar el archivo binario
+    const fileRes = await fetch(metaData.url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!fileRes.ok) {
+      return null;
+    }
+
+    const arrayBuffer = await fileRes.arrayBuffer();
+    return {
+      buffer: Buffer.from(arrayBuffer),
+      mimeType: metaData.mime_type,
+    };
+  }
 }

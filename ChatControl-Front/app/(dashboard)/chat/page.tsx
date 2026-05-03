@@ -1,0 +1,400 @@
+'use client';
+
+import { useEffect, useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import Image from 'next/image';
+import { io, Socket } from 'socket.io-client';
+import {
+  isLoggedIn,
+  getMe,
+  getConversations,
+  getMessages,
+  getConversation,
+  markConversationAsRead,
+  sendMessage,
+  generateReply,
+  type Conversation,
+  type Message,
+  type NewMessagePayload,
+} from '@/lib/api';
+import { formatPhoneDisplay } from '@/lib/format';
+
+const WS_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
+// --- Icons ---
+function PersonIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '1.2rem', height: '1.2rem', ...style }} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+    </svg>
+  );
+}
+
+function SearchIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '1rem', height: '1rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
+function SparklesIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '1rem', height: '1rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+    </svg>
+  );
+}
+
+function SendIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '1.1rem', height: '1.1rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </svg>
+  );
+}
+
+function GalleryIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '1.1rem', height: '1.1rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+    </svg>
+  );
+}
+
+export default function ChatPage() {
+  const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [replyInput, setReplyInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [typingHint, setTypingHint] = useState('');
+  const [canSend, setCanSend] = useState(false);
+  
+  const socketRef = useRef<Socket | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  const myUserIdRef = useRef<string | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  selectedIdRef.current = selectedId;
+
+  useEffect(() => { setMounted(true); }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    if (!isLoggedIn()) { router.replace('/login'); return; }
+    getMe().then(m => { myUserIdRef.current = m.id; }).catch(() => {});
+    loadConversations();
+  }, [mounted, router]);
+
+  useEffect(() => {
+    if (!mounted || !isLoggedIn()) return;
+    const token = localStorage.getItem('chatcontrol_token');
+    const socket = io(WS_BASE, { transports: ['websocket'], auth: { token: token || '' } });
+    socketRef.current = socket;
+
+    socket.on('new_message', (payload: NewMessagePayload) => {
+      loadConversations(false);
+      if (payload.conversationId === selectedIdRef.current) {
+        setMessages(prev => {
+          if (prev.some(m => m.id === payload.message.id)) return prev;
+          return [...prev, payload.message];
+        });
+        markConversationAsRead(payload.conversationId);
+      }
+    });
+
+    socket.on('typing', (p: any) => {
+      if (p.userId === myUserIdRef.current || p.conversationId !== selectedIdRef.current) return;
+      if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+      if (!p.typing) { setTypingHint(''); return; }
+      setTypingHint(`${p.displayName || 'Cliente'} está escribiendo...`);
+      typingStopTimerRef.current = setTimeout(() => setTypingHint(''), 3000);
+    });
+
+    return () => { socket.disconnect(); };
+  }, [mounted]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    (async () => {
+      try {
+        const [convRes, msgRes] = await Promise.all([
+          getConversation(selectedId),
+          getMessages(selectedId),
+        ]);
+        setMessages(msgRes.messages);
+        setNextCursor(msgRes.nextCursor);
+        setCanSend(convRes.canSend ?? false);
+        markConversationAsRead(selectedId);
+      } catch (err) {}
+    })();
+  }, [selectedId]);
+
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el || loadingMore) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages, selectedId, loadingMore]);
+
+  async function loadConversations(showLoading = true) {
+    if (showLoading) setLoading(true);
+    try {
+      const list = await getConversations();
+      setConversations(list);
+    } catch (err) {} finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSend() {
+    if (!selectedId || !replyInput.trim() || sending || !canSend) return;
+    setSending(true);
+    const text = replyInput.trim();
+    setReplyInput('');
+    try {
+      await sendMessage(selectedId, text);
+      const msgRes = await getMessages(selectedId);
+      setMessages(msgRes.messages);
+    } catch (err) {
+      setReplyInput(text);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function handleGenerateReply() {
+    if (!selectedId || generating) return;
+    setGenerating(true);
+    try {
+      const res = await generateReply(selectedId);
+      setReplyInput(res.text || '');
+    } catch (err) {} finally {
+      setGenerating(false);
+    }
+  }
+
+  const filteredConversations = conversations.filter(c => 
+    c.phone.includes(searchQuery) || (c.name?.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  const selectedConv = conversations.find(c => c.id === selectedId);
+
+  if (!mounted) return null;
+
+  return (
+    <div style={{ display: 'flex', width: '100%', height: '100vh', background: '#040404', color: '#F2F2F2', overflow: 'hidden' }}>
+      
+      {/* ── Sidebar: Lista de Chats ── */}
+      <aside style={{ width: '380px', borderRight: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', background: '#080808' }}>
+        <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em' }}>Mensajes</h2>
+            <div style={{ padding: '0.4rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', color: '#EF4444' }}>
+              <SearchIcon />
+            </div>
+          </div>
+          <div style={{ position: 'relative' }}>
+            <SearchIcon style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#444' }} />
+            <input 
+              type="text" 
+              placeholder="Buscar conversación..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', padding: '0.75rem 1rem 0.75rem 2.8rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
+            />
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }} className="custom-scrollbar">
+          {loading ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#444', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 800 }}>Sincronizando...</div>
+          ) : filteredConversations.map(c => (
+            <button 
+              key={c.id}
+              onClick={() => setSelectedId(c.id)}
+              style={{ 
+                width: '100%', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '1rem', 
+                padding: '1rem', 
+                borderRadius: '16px', 
+                border: 'none', 
+                background: selectedId === c.id ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                textAlign: 'left',
+                marginBottom: '0.25rem',
+                position: 'relative'
+              }}
+              onMouseEnter={(e) => { if(selectedId !== c.id) e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; }}
+              onMouseLeave={(e) => { if(selectedId !== c.id) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: selectedId === c.id ? '#EF4444' : 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: selectedId === c.id ? 'white' : '#666', transition: 'all 0.3s' }}>
+                <PersonIcon />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: selectedId === c.id ? 'white' : '#F2F2F2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {c.name || formatPhoneDisplay(c.phone)}
+                  </span>
+                  <span style={{ fontSize: '0.7rem', color: '#444' }}>{c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                </div>
+                <p style={{ fontSize: '0.8rem', color: (c.unreadCount ?? 0) > 0 ? '#EF4444' : '#666', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: (c.unreadCount ?? 0) > 0 ? 700 : 400 }}>
+                  {c.lastMessagePreview || 'Inicia una conversación'}
+                </p>
+              </div>
+              {(c.unreadCount ?? 0) > 0 && (
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#EF4444', position: 'absolute', right: '1.25rem', top: '50%', transform: 'translateY(-50%)', boxShadow: '0 0 10px #EF4444' }}></div>
+              )}
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      {/* ── Main: Área de Conversación ── */}
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#040404', position: 'relative' }}>
+        {selectedId ? (
+          <>
+            {/* Header del Chat */}
+            <header style={{ height: '80px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', padding: '0 2rem', justifyContent: 'space-between', background: 'rgba(4,4,4,0.8)', backdropFilter: 'blur(10px)', zIndex: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <PersonIcon />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800 }}>{selectedConv?.name || formatPhoneDisplay(selectedConv?.phone || '')}</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: canSend ? '#4ADE80' : '#EF4444' }}></div>
+                    <span style={{ fontSize: '0.7rem', color: '#666', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>
+                      {canSend ? 'Ventana de 24h activa' : 'Fuera de ventana'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', color: '#8C8C8C', padding: '0.6rem 1.2rem', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}>
+                VER DETALLES
+              </button>
+            </header>
+
+            {/* Mensajes */}
+            <div 
+              ref={messagesContainerRef}
+              style={{ flex: 1, overflowY: 'auto', padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }} 
+              className="custom-scrollbar"
+            >
+              <div style={{ alignSelf: 'center', background: 'rgba(255,255,255,0.03)', padding: '0.4rem 1rem', borderRadius: '20px', fontSize: '0.7rem', color: '#444', fontWeight: 700, textTransform: 'uppercase' }}>Hoy</div>
+              
+              {messages.map((m) => {
+                const isAgent = !m.fromUser;
+                return (
+                  <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAgent ? 'flex-end' : 'flex-start', maxWidth: '75%', alignSelf: isAgent ? 'flex-end' : 'flex-start' }}>
+                    <div style={{ 
+                      padding: '1rem 1.25rem', 
+                      borderRadius: isAgent ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
+                      background: isAgent ? 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)' : '#1A1A1A',
+                      color: 'white',
+                      fontSize: '0.95rem',
+                      lineHeight: '1.5',
+                      boxShadow: isAgent ? '0 10px 25px rgba(239, 68, 68, 0.15)' : 'none',
+                      border: isAgent ? 'none' : '1px solid rgba(255,255,255,0.05)'
+                    }}>
+                      {m.text}
+                    </div>
+                    <span style={{ fontSize: '0.65rem', color: '#444', marginTop: '0.4rem', fontWeight: 700 }}>
+                      {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                );
+              })}
+              {typingHint && (
+                <div style={{ alignSelf: 'flex-start', color: '#EF4444', fontSize: '0.75rem', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div className="typing-dot"></div>
+                  {typingHint}
+                </div>
+              )}
+            </div>
+
+            {/* Footer de Entrada */}
+            <footer style={{ padding: '1.5rem 2rem', background: '#040404' }}>
+              <div style={{ background: '#0D0D0D', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '20px', padding: '0.5rem', display: 'flex', alignItems: 'flex-end', gap: '0.5rem', boxShadow: '0 -10px 40px rgba(0,0,0,0.5)' }}>
+                <button style={{ padding: '0.75rem', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }} title="Adjuntar">
+                  <GalleryIcon />
+                </button>
+                <textarea 
+                  value={replyInput}
+                  onChange={(e) => setReplyInput(e.target.value)}
+                  onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                  placeholder={canSend ? "Escribe un mensaje..." : "Ventana de 24h cerrada..."}
+                  disabled={!canSend}
+                  style={{ flex: 1, background: 'none', border: 'none', padding: '0.75rem 0', color: 'white', outline: 'none', fontSize: '0.95rem', resize: 'none', maxHeight: '150px' }}
+                />
+                <div style={{ display: 'flex', gap: '0.4rem', padding: '0.25rem' }}>
+                  <button 
+                    onClick={handleGenerateReply}
+                    disabled={generating || !canSend}
+                    style={{ padding: '0.75rem', borderRadius: '14px', background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', border: 'none', cursor: 'pointer', transition: 'all 0.2s' }}
+                    title="Asistente IA"
+                  >
+                    <SparklesIcon />
+                  </button>
+                  <button 
+                    onClick={handleSend}
+                    disabled={sending || !canSend || !replyInput.trim()}
+                    style={{ 
+                      width: '46px', 
+                      height: '46px', 
+                      borderRadius: '14px', 
+                      background: canSend && replyInput.trim() ? '#EF4444' : '#1A1A1A', 
+                      color: 'white', 
+                      border: 'none', 
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.2s',
+                      boxShadow: canSend && replyInput.trim() ? '0 8px 20px rgba(239, 68, 68, 0.3)' : 'none'
+                    }}
+                  >
+                    <SendIcon />
+                  </button>
+                </div>
+              </div>
+            </footer>
+          </>
+        ) : (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.3 }}>
+            <Image src="/assets/images/NOIRLINE2.png" alt="Nextline" width={120} height={120} style={{ filter: 'grayscale(1)', marginBottom: '2rem' }} />
+            <p style={{ fontSize: '0.9rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.2em' }}>Selecciona una conversación</p>
+          </div>
+        )}
+      </main>
+
+      <style jsx global>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #EF4444; }
+        
+        @keyframes typing {
+          0% { opacity: .2; }
+          20% { opacity: 1; }
+          100% { opacity: .2; }
+        }
+        .typing-dot {
+          width: 4px; height: 4px; border-radius: 50%; background: #EF4444;
+          animation: typing 1.4s infinite both;
+        }
+      `}</style>
+    </div>
+  );
+}

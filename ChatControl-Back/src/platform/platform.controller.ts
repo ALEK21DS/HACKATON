@@ -33,6 +33,18 @@ class OrgStatusBodyDto {
   status!: OrganizationStatus;
 }
 
+class RenameOrgBodyDto {
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+}
+
+class ResetAdminPasswordBodyDto {
+  @IsString()
+  @MinLength(6)
+  newPassword!: string;
+}
+
 class BootstrapFirstAdminBodyDto {
   @IsEmail()
   email!: string;
@@ -79,6 +91,24 @@ export class PlatformController {
     @Body() dto: OrgStatusBodyDto,
   ) {
     return this.platform.setOrganizationStatus(user.userId, id, dto.status);
+  }
+
+  @Patch(':id/rename')
+  rename(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: RenameOrgBodyDto,
+  ) {
+    return this.platform.renameOrganization(user.userId, id, dto.name);
+  }
+
+  @Patch(':id/reset-admin-password')
+  resetAdminPassword(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ResetAdminPasswordBodyDto,
+  ) {
+    return this.platform.resetAdminPassword(user.userId, id, dto.newPassword);
   }
 
   /** Solo si la empresa aún no tiene usuarios (p. ej. se creó solo con nombre). */

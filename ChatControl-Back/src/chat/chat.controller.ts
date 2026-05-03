@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -51,8 +52,26 @@ export class ChatController {
   }
 
   @Get('conversations/:id/messages')
-  async getMessages(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.chat.getMessages(id, user.organizationId!);
+  async getMessages(
+    @CurrentUser() user: AuthUser, 
+    @Param('id') id: string,
+    @Query('cursor') cursor?: string
+  ) {
+    return this.chat.getMessages(id, user.organizationId!, cursor);
+  }
+
+  @Get('conversations/:id/gallery')
+  async getGallery(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.chat.getGallery(id, user.organizationId!);
+  }
+
+  @Get('conversations/:id/search')
+  async searchMessages(
+    @CurrentUser() user: AuthUser, 
+    @Param('id') id: string,
+    @Query('q') query: string,
+  ) {
+    return this.chat.searchMessages(id, user.organizationId!, query);
   }
 
   @Patch('conversations/:id/read')

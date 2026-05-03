@@ -15,6 +15,10 @@ export interface Message {
   text: string;
   timestamp: number;
   fromAi?: boolean;
+  type?: string;
+  mediaUrl?: string | null;
+  mimeType?: string | null;
+  fileName?: string | null;
 }
 
 export interface Conversation {
@@ -50,6 +54,11 @@ export class ChatService {
     messageId: string;
     timestamp: number;
     text: string;
+    type?: MessageType;
+    mediaUrl?: string;
+    mimeType?: string;
+    fileName?: string;
+    contactName?: string;
   }): Promise<void> {
     const phone = normalizePhone(payload.from);
     const contact = await this.prisma.contact.upsert({
@@ -59,7 +68,11 @@ export class ChatService {
           phone,
         },
       },
-      create: { organizationId: payload.organizationId, phone },
+      create: { 
+        organizationId: payload.organizationId, 
+        phone,
+        name: payload.contactName || null,
+      },
       update: {},
     });
     let conversation = await this.prisma.conversation.findFirst({
@@ -84,9 +97,12 @@ export class ChatService {
       create: {
         conversationId: conversation.id,
         direction: MessageDirection.IN,
-        type: MessageType.TEXT,
+        type: payload.type || MessageType.TEXT,
         status: MessageStatus.RECEIVED,
         body: payload.text,
+        mediaUrl: payload.mediaUrl,
+        mimeType: payload.mimeType,
+        fileName: payload.fileName,
         whatsappMessageId: payload.messageId,
         whatsappTimestamp: new Date(payload.timestamp),
       },
@@ -101,7 +117,9 @@ export class ChatService {
         fromUser: true,
         text: payload.text,
         timestamp: payload.timestamp,
-      },
+        mediaUrl: payload.mediaUrl,
+        mimeType: payload.mimeType,
+      } as any,
     );
   }
 
@@ -183,11 +201,55 @@ export class ChatService {
     return result;
   }
 
-  async getMessages(conversationId: string, organizationId: string): Promise<Message[]> {
+  async getMessages(
+    conversationId: string, 
+    organizationId: string, 
+    cursor?: string
+  ): Promise<{ messages: Message[]; nextCursor: string | null }> {
     await this.assertConversationInOrg(conversationId, organizationId);
+    
+    const take = 50;
     const rows = await this.prisma.message.findMany({
       where: { conversationId },
-      orderBy: { whatsappTimestamp: 'asc' },
+      take: take + 1,
+      cursor: cursor ? { id: cursor } : undefined,
+      orderBy: { whatsappTimestamp: 'desc' },
+    });
+
+    let nextCursor: string | null = null;
+    if (rows.length > take) {
+      const nextItem = rows.pop();
+      nextCursor = nextItem!.id;
+    }
+
+    const messages = rows.reverse().map((m) => ({
+      id: m.id,
+      conversationId: m.conversationId,
+      fromUser: m.direction === MessageDirection.IN,
+      text: m.body,
+      timestamp: m.whatsappTimestamp.getTime(),
+      fromAi: m.fromAi ?? undefined,
+      type: m.type,
+      mediaUrl: m.mediaUrl,
+      mimeType: m.mimeType,
+      fileName: m.fileName,
+    }));
+
+    return { messages, nextCursor };
+  }
+
+  async getGallery(conversationId: string, organizationId: string): Promise<Message[]> {
+    await this.assertConversationInOrg(conversationId, organizationId);
+    const rows = await this.prisma.message.findMany({
+      where: { 
+        conversationId,
+        OR: [
+          { type: { in: [MessageType.IMAGE, MessageType.VIDEO, MessageType.AUDIO, MessageType.DOCUMENT] } },
+          { body: { contains: 'http://', mode: 'insensitive' } },
+          { body: { contains: 'https://', mode: 'insensitive' } }
+        ]
+      },
+      orderBy: { whatsappTimestamp: 'desc' }, // Descending for gallery view
     });
     return rows.map((m) => ({
       id: m.id,
@@ -196,6 +258,33 @@ export class ChatService {
       text: m.body,
       timestamp: m.whatsappTimestamp.getTime(),
       fromAi: m.fromAi ?? undefined,
+      type: m.type,
+      mediaUrl: m.mediaUrl,
+      mimeType: m.mimeType,
+      fileName: m.fileName,
+    }));
+  }
+
+  async searchMessages(conversationId: string, organizationId: string, query: string): Promise<Message[]> {
+    await this.assertConversationInOrg(conversationId, organizationId);
+    if (!query || query.trim().length === 0) return [];
+    
+    const rows = await this.prisma.message.findMany({
+      where: { 
+        conversationId,
+        body: { contains: query, mode: 'insensitive' },
+        type: MessageType.TEXT
+      },
+      orderBy: { whatsappTimestamp: 'desc' },
+    });
+    return rows.map((m) => ({
+      id: m.id,
+      conversationId: m.conversationId,
+      fromUser: m.direction === MessageDirection.IN,
+      text: m.body,
+      timestamp: m.whatsappTimestamp.getTime(),
+      fromAi: m.fromAi ?? undefined,
+      type: m.type,
     }));
   }
 
@@ -304,10 +393,19 @@ export class ChatService {
     conversationId: string,
   ): Promise<{ text: string; usedFallbackModel?: boolean }> {
     await this.assertConversationInOrg(conversationId, organizationId);
-    const messages = await this.getMessages(conversationId, organizationId);
-    const recent = messages
-      .slice(-10)
-      .map((m) => (m.fromUser ? `Cliente: ${m.text}` : `Agente: ${m.text}`));
+    
+    // Fetch last 10 messages for context
+    const rows = await this.prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { whatsappTimestamp: 'desc' },
+      take: 10,
+    });
+    
+    // Reverse to chronological order
+    const recent = rows
+      .reverse()
+      .map((m) => (m.direction === MessageDirection.IN ? `Cliente: ${m.body}` : `Agente: ${m.body}`));
+      
     const context = recent.join('\n');
     return this.ai.generateReply(organizationId, context);
   }

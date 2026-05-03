@@ -170,6 +170,51 @@ export class PlatformService {
     return updated;
   }
 
+  async renameOrganization(actorUserId: string, id: string, name: string) {
+    const org = await this.prisma.organization.findUnique({ where: { id } });
+    if (!org) throw new NotFoundException('Empresa no encontrada');
+    const trimmed = name.trim();
+    if (!trimmed) throw new BadRequestException('El nombre no puede estar vacío');
+    const updated = await this.prisma.organization.update({
+      where: { id },
+      data: { name: trimmed },
+      select: { id: true, name: true, status: true },
+    });
+    await this.logAudit({
+      actorUserId,
+      action: 'ORG_RENAMED',
+      targetOrganizationId: id,
+      metadata: { previous: org.name, next: trimmed },
+    });
+    return updated;
+  }
+
+  async resetAdminPassword(
+    actorUserId: string,
+    organizationId: string,
+    newPassword: string,
+  ) {
+    const org = await this.prisma.organization.findUnique({ where: { id: organizationId } });
+    if (!org) throw new NotFoundException('Empresa no encontrada');
+    const admin = await this.prisma.user.findFirst({
+      where: { organizationId, role: 'ORG_ADMIN' },
+    });
+    if (!admin) throw new NotFoundException('La empresa no tiene un administrador asignado');
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const updated = await this.prisma.user.update({
+      where: { id: admin.id },
+      data: { passwordHash },
+      select: { id: true, email: true },
+    });
+    await this.logAudit({
+      actorUserId,
+      action: 'ORG_ADMIN_PASSWORD_RESET',
+      targetOrganizationId: organizationId,
+      metadata: { adminEmail: admin.email },
+    });
+    return { success: true, adminEmail: updated.email };
+  }
+
   async listAuditLogs(params: { organizationId?: string; take?: number }) {
     const take = Math.min(params.take ?? 100, 200);
     return this.prisma.platformAuditLog.findMany({

@@ -6,6 +6,9 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Prefijo global para todas las rutas
+  app.setGlobalPrefix('api');
+
   // WebSocket con Socket.IO (mismo servidor HTTP)
   app.useWebSocketAdapter(new IoAdapter(app));
 

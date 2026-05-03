@@ -29,7 +29,18 @@ export class AuthService {
     private readonly prisma: PrismaService,
   ) {}
 
-  async login(dto: LoginDto): Promise<{ access_token: string }> {
+  private async generateTokens(payload: JwtPayload): Promise<{ access_token: string; refresh_token: string }> {
+    const [access_token, refresh_token] = await Promise.all([
+      this.jwtService.signAsync(payload),
+      this.jwtService.signAsync(payload, {
+        secret: this.config.get<string>('JWT_REFRESH_SECRET', 'default-refresh-secret-change-me'),
+        expiresIn: this.config.get<string>('JWT_REFRESH_EXPIRES_IN', '30d'),
+      }),
+    ]);
+    return { access_token, refresh_token };
+  }
+
+  async login(dto: LoginDto): Promise<{ access_token: string; refresh_token: string }> {
     const email = dto.email.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({
       where: { email },
@@ -51,15 +62,14 @@ export class AuthService {
       role: user.role,
       organizationId: user.organizationId,
     };
-    const access_token = this.jwtService.sign(payload);
-    return { access_token };
+    return this.generateTokens(payload);
   }
 
   /**
    * Compatibilidad con login anterior: mismo body { phone, password }.
    * Si APP_LOGIN_PASSWORD coincide, emite JWT para el usuario con email `phone@legacy.chatcontrol`.
    */
-  async loginLegacy(dto: LegacyLoginDto): Promise<{ access_token: string }> {
+  async loginLegacy(dto: LegacyLoginDto): Promise<{ access_token: string; refresh_token: string }> {
     const expectedPassword = this.config.get<string>('APP_LOGIN_PASSWORD');
     if (!expectedPassword || dto.password !== expectedPassword) {
       throw new UnauthorizedException('Credenciales inválidas');
@@ -88,7 +98,29 @@ export class AuthService {
       role: user.role,
       organizationId: user.organizationId,
     };
-    return { access_token: this.jwtService.sign(payload) };
+    return this.generateTokens(payload);
+  }
+
+  async refreshToken(refreshToken: string): Promise<{ access_token: string; refresh_token: string }> {
+    try {
+      const payload = await this.jwtService.verifyAsync<JwtPayload>(refreshToken, {
+        secret: this.config.get<string>('JWT_REFRESH_SECRET', 'default-refresh-secret-change-me'),
+      });
+      const user = await this.validatePayload(payload);
+      if (!user) {
+        throw new UnauthorizedException('Usuario no válido o empresa suspendida');
+      }
+      // Re-generamos con datos actualizados
+      const newPayload: JwtPayload = {
+        sub: user.userId,
+        email: user.email,
+        role: user.role,
+        organizationId: user.organizationId,
+      };
+      return this.generateTokens(newPayload);
+    } catch (error) {
+      throw new UnauthorizedException('Refresh token inválido o expirado');
+    }
   }
 
   async validatePayload(payload: JwtPayload): Promise<AuthUser | null> {

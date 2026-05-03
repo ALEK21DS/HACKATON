@@ -2,22 +2,34 @@
   display: flex;
   height: 100vh;
   overflow: hidden;
+  background-color: #040404;
   animation: layoutFadeIn 0.4s ease-out;
 }
 
-/* ----- Menú lateral: icono + texto en fila; botón 3 líneas colapsa (solo iconos) ----- */
+/* ============================================================
+   SIDEBAR NAV — Dark Futuristic Theme (matches admin panel)
+   ============================================================ */
+
 .navBar {
   width: 200px;
   min-width: 200px;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
+  background: #0d0d0d;
+  border-right: 1px solid rgba(64, 64, 64, 0.3);
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  padding: 0.5rem 0.5rem 0.5rem 0.5rem;
-  gap: 0.25rem;
+  padding: 1.5rem 0.75rem;
+  gap: 0;
   flex-shrink: 0;
-  transition: width 0.2s ease, min-width 0.2s ease;
+  transition: width 0.25s cubic-bezier(0.16,1,0.3,1), min-width 0.25s cubic-bezier(0.16,1,0.3,1);
+  box-shadow: 4px 0 30px rgba(0, 0, 0, 0.6);
+  animation: navSlideIn 0.45s cubic-bezier(0.16,1,0.3,1) both;
+  position: relative;
+  z-index: 10;
+}
+
+@keyframes navSlideIn {
+  from { opacity: 0; transform: translateX(-48px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 
 .navBarCollapsed {
@@ -35,51 +47,196 @@
 
 .navBarCollapsed .navItem,
 .navBarCollapsed .navItemActive {
-  width: 52px;
-  min-width: 52px;
+  width: 48px;
+  min-width: 48px;
   justify-content: center;
   padding-left: 0;
   padding-right: 0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 
-/* Botón 3 líneas: siempre pegado al borde (arriba/izquierda), cuadrado con border-radius y sombra como ítems colapsados */
+/* Brand header — plain text container, navHeader handles the border/height */
+.navBrand {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+}
+
+.navBrand h1 {
+  font-family: var(--font-headline, 'Inter', sans-serif);
+  font-weight: 900;
+  font-size: 1rem;
+  color: #EF4444;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.navBrand p {
+  font-size: 0.55rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #8C8C8C;
+  margin: 0.2rem 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Unified header: FIXED HEIGHT so items never shift position */
+.navHeader {
+  width: 100%;
+  height: 56px;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  background: transparent;
+  border: none;
+  padding: 0 0.25rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(64, 64, 64, 0.3);
+  cursor: pointer;
+  text-align: left;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: opacity 0.2s;
+  box-sizing: border-box;
+}
+
+.navHeader:hover {
+  opacity: 0.8;
+}
+
+.navLogoImg {
+  object-fit: contain;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.35));
+}
+
+/* User card button */
+.navUserCard {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #1A1A1A;
+  border: 1px solid rgba(64, 64, 64, 0.3);
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  text-align: left;
+  overflow: hidden;
+}
+
+.navUserCard:hover,
+.navUserCardActive {
+  background: #222;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.navBarCollapsed .navUserCard {
+  justify-content: center;
+  padding: 0.6rem 0;
+}
+
+.navUserAvatar {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #EF4444;
+  flex-shrink: 0;
+}
+
+.navUserAvatar svg {
+  width: 16px;
+  height: 16px;
+}
+
+.navUserInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.navUserOrg {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #F2F2F2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.navUserEmail {
+  display: block;
+  font-size: 0.6rem;
+  font-weight: 500;
+  color: #8C8C8C;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Toggle button */
 .navToggle {
-  width: 52px;
-  height: 52px;
-  min-width: 52px;
-  min-height: 52px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  margin: 0;
+  margin: 0 0 1rem 0.25rem;
   align-self: flex-start;
   background: transparent;
   border: none;
   border-radius: 8px;
-  color: var(--text-muted);
+  color: #8C8C8C;
   cursor: pointer;
-  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+  transition: background 0.2s, color 0.2s;
   flex-shrink: 0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 
 .navBarCollapsed .navToggle {
   align-self: center;
+  margin-left: 0;
 }
 
 .navToggle:hover {
-  background: var(--surface-hover);
-  color: var(--text);
+  background: #1A1A1A;
+  color: #F2F2F2;
 }
 
 .navToggle svg {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
 }
 
+/* Nav items list */
 .navItems {
   flex: 1;
   display: flex;
@@ -90,91 +247,95 @@
 }
 
 .navItemActive {
-  min-height: 48px;
-  border-radius: 8px;
-  background: var(--surface-hover);
-  color: var(--accent);
+  min-height: 44px;
+  border-radius: 10px;
+  background: #EF4444;
+  color: #fff;
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
-  gap: 0.5rem;
-  padding: 0.35rem 0.75rem;
+  gap: 0.6rem;
+  padding: 0 0.75rem;
   box-sizing: border-box;
   flex-shrink: 0;
 }
 
 .navItemActive svg {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
 }
 
 .navItem {
-  min-height: 48px;
-  border-radius: 8px;
+  min-height: 44px;
+  border-radius: 10px;
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
-  gap: 0.5rem;
-  padding: 0.35rem 0.75rem;
+  gap: 0.6rem;
+  padding: 0 0.75rem;
   box-sizing: border-box;
   background: transparent;
   border: none;
-  color: var(--text-muted);
+  color: #8C8C8C;
   text-decoration: none;
   transition: background 0.2s, color 0.2s;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .navItem:hover {
-  background: var(--surface-hover);
-  color: var(--text);
+  background: #1A1A1A;
+  color: #F2F2F2;
 }
 
 .navItem svg {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
 }
 
-.navItem .navLabel {
-  color: var(--text-muted);
-}
-
-.navItem:hover .navLabel {
-  color: var(--text);
-}
-
 .navLabel {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
   line-height: 1.2;
   white-space: nowrap;
 }
 
 .navItemActive .navLabel {
-  color: var(--accent);
+  color: #fff;
 }
 
+.navItem .navLabel {
+  color: #8C8C8C;
+}
+
+.navItem:hover .navLabel {
+  color: #F2F2F2;
+}
+
+/* Footer */
 .navFooter {
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+  border-top: 1px solid rgba(64, 64, 64, 0.3);
   width: 100%;
   display: flex;
-  justify-content: flex-start;
-  padding-left: 0.75rem;
-  padding-right: 0.75rem;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .navBarCollapsed .navFooter {
-  justify-content: center;
+  align-items: center;
   padding-left: 0;
   padding-right: 0;
 }
 
+/* User wrap + dropdown */
 .navUserWrap {
   position: relative;
   display: flex;
@@ -187,65 +348,83 @@
 }
 
 .navLogout {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: transparent;
+  width: 100%;
+  min-height: 40px;
+  border-radius: 10px;
+  background: #1A1A1A;
   border: none;
-  color: var(--text-muted);
+  color: #8C8C8C;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  gap: 0.6rem;
+  padding: 0 0.75rem;
+  cursor: pointer;
   transition: background 0.2s, color 0.2s;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
 }
 
 .navBarCollapsed .navLogout {
   width: 48px;
+  min-width: 48px;
+  justify-content: center;
+  padding: 0;
 }
 
 .navLogout:hover {
-  background: var(--surface-hover);
-  color: var(--text);
+  background: #EF4444;
+  color: #fff;
 }
 
 .navLogout svg {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 .navUserDropdown {
   position: absolute;
-  bottom: 100%;
-  left: 0px;
-  margin-bottom: 0.75rem;
-  min-width: 140px;
-  background: var(--surface-hover);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  bottom: calc(100% + 0.5rem);
+  left: 0;
+  min-width: 180px;
+  background: #0d0d0d;
+  border: 1px solid rgba(64, 64, 64, 0.3);
+  border-radius: 12px;
+  box-shadow: 0 -4px 30px rgba(0, 0, 0, 0.8);
   overflow: hidden;
   z-index: 100;
+  animation: dropdownIn 0.2s cubic-bezier(0.16,1,0.3,1) both;
+}
+
+@keyframes dropdownIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .navBarCollapsed .navUserDropdown {
-  left: 3px;
-  transform: none;
+  left: 4px;
 }
 
 .navUserOption {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
   width: 100%;
-  padding: 0.35rem 0.6rem;
+  padding: 0.65rem 0.85rem;
   border: none;
   background: transparent;
-  color: var(--text);
-  font-size: 0.8rem;
+  color: #8C8C8C;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
   text-align: left;
   cursor: pointer;
   text-decoration: none;
-  transition: background 0.2s, color 0.2s;
+  transition: background 0.15s, color 0.15s;
 }
 
 .navUserOption svg {
@@ -255,20 +434,21 @@
 }
 
 .navUserOption:hover {
-  background: var(--surface);
+  background: #1A1A1A;
+  color: #F2F2F2;
 }
 
 .navUserOption:not(:last-child) {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid rgba(64, 64, 64, 0.3);
 }
 
 .navUserOptionLogout {
-  color: var(--danger);
+  color: #EF4444;
 }
 
 .navUserOptionLogout:hover {
-  color: var(--danger);
-  background: rgba(248, 81, 73, 0.1);
+  color: #fff;
+  background: #EF4444;
 }
 
 .loadingPage {
@@ -293,8 +473,8 @@
   width: 360px;
   min-width: 280px;
   max-width: 40vw;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
+  background: #0d0d0d;
+  border-right: 1px solid rgba(64, 64, 64, 0.2);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -315,12 +495,26 @@
 }
 
 .sidebarHeader {
-  padding: 0.85rem 1rem;
-  border-bottom: 1px solid var(--border);
+  padding: 1.25rem 1rem;
+  border-bottom: 1px solid rgba(64, 64, 64, 0.2);
   display: flex;
   align-items: center;
-  border-radius: 0 16px 0 0;
+  gap: 0.75rem;
   flex-shrink: 0;
+}
+
+.sidebarHeader svg {
+  color: #EF4444;
+  filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.4));
+}
+
+.sidebarHeader h2 {
+  font-family: var(--font-headline);
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #F2F2F2;
 }
 
 .sidebarBrand {
@@ -341,24 +535,31 @@
 
 .searchWrap {
   flex-shrink: 0;
-  padding: 0.25rem 0.65rem 0.3rem;
-  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(64, 64, 64, 0.2);
 }
 
 .searchInput {
   width: 100%;
-  padding: 0.35rem 0.45rem 0.35rem 1.6rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  font-size: 0.875rem;
-  transition: border-color 0.2s;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+  padding: 0.6rem 0.75rem 0.6rem 2rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(64, 64, 64, 0.3);
+  border-radius: 10px;
+  color: #F2F2F2;
+  font-size: 0.8rem;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238c8c8c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: 0.45rem center;
+  background-position: 0.65rem center;
   background-size: 0.9rem;
   box-sizing: border-box;
+}
+
+.searchInput:focus {
+  outline: none;
+  background: rgba(255, 255, 255, 0.05);
+  border-color: #EF4444;
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.15);
 }
 
 .searchInput::placeholder {
@@ -422,29 +623,29 @@
 .convBtn,
 .convActive {
   width: 100%;
-  padding: 0.75rem 1rem;
+  padding: 0.85rem 1rem;
   text-align: left;
-  background: none;
+  background: transparent;
   border: none;
-  color: var(--text);
+  color: #F2F2F2;
   cursor: pointer;
-  transition: background 0.2s, border-color 0.2s;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.85rem;
   border-radius: 12px;
-  margin: 0 0.5rem;
-  border: 2px solid transparent;
+  margin: 0;
+  border-left: 3px solid transparent;
 }
 
-.convBtn:hover,
-.convActive {
-  background: var(--surface-hover);
+.convBtn:hover {
+  background: rgba(255, 255, 255, 0.03);
+  transform: translateX(2px);
 }
 
 .convActive {
-  border-color: var(--accent);
-  background: rgba(88, 166, 255, 0.08);
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.08) 0%, transparent 100%);
+  border-left-color: #EF4444;
 }
 
 /* Card con mensajes no leídos: resaltado con color del sistema (accent) */
@@ -542,6 +743,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  background-color: #040404;
   animation: mainFadeIn 0.35s ease-out;
 }
 

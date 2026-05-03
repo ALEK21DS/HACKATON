@@ -32,6 +32,12 @@ class LegacyLoginBodyDto {
   password!: string;
 }
 
+class RefreshTokenDto {
+  @IsString()
+  @IsNotEmpty()
+  refresh_token!: string;
+}
+
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
@@ -53,6 +59,12 @@ export class AuthController {
       phone: dto.phone,
       password: dto.password,
     });
+  }
+
+  @Post('refresh')
+  @UsePipes(new ValidationPipe({ whitelist: true }))
+  async refresh(@Body() dto: RefreshTokenDto) {
+    return this.authService.refreshToken(dto.refresh_token);
   }
 
   @Get('me')

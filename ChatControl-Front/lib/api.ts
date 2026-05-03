@@ -10,6 +10,17 @@ function getToken(): string | null {
   return localStorage.getItem('chatcontrol_token');
 }
 
+function getRefreshToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('chatcontrol_refresh_token');
+}
+
+function setTokens(access: string, refresh?: string) {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('chatcontrol_token', access);
+  if (refresh) localStorage.setItem('chatcontrol_refresh_token', refresh);
+}
+
 export async function api<T>(
   path: string,
   options: RequestInit = {},
@@ -20,7 +31,31 @@ export async function api<T>(
     ...options.headers,
   };
   if (token) (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
+  
+  let res = await fetch(`${BASE}${path}`, { ...options, headers });
+  
+  if (res.status === 401 && path !== '/auth/login' && path !== '/auth/refresh') {
+    const refreshToken = getRefreshToken();
+    if (refreshToken) {
+      const refreshRes = await fetch(`${BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (refreshRes.ok) {
+        const refData = await refreshRes.json();
+        setTokens(refData.access_token, refData.refresh_token);
+        (headers as Record<string, string>)['Authorization'] = `Bearer ${refData.access_token}`;
+        // Retry the original request
+        res = await fetch(`${BASE}${path}`, { ...options, headers });
+      } else {
+        logout();
+      }
+    } else {
+      logout();
+    }
+  }
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || data.error?.message || res.statusText);
   return data as T;
@@ -39,21 +74,21 @@ export interface MeResponse {
 
 // Auth: email + contraseña (usuarios en BD)
 export async function login(email: string, password: string) {
-  const data = await api<{ access_token: string }>('/auth/login', {
+  const data = await api<{ access_token: string; refresh_token: string }>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
   });
-  if (typeof window !== 'undefined') localStorage.setItem('chatcontrol_token', data.access_token);
+  setTokens(data.access_token, data.refresh_token);
   return data;
 }
 
 /** Compatibilidad MVP: teléfono + APP_LOGIN_PASSWORD (usuario seed legacy) */
 export async function loginLegacy(phone: string, password: string) {
-  const data = await api<{ access_token: string }>('/auth/login-legacy', {
+  const data = await api<{ access_token: string; refresh_token?: string }>('/auth/login-legacy', {
     method: 'POST',
     body: JSON.stringify({ phone, password }),
   });
-  if (typeof window !== 'undefined') localStorage.setItem('chatcontrol_token', data.access_token);
+  setTokens(data.access_token, data.refresh_token);
   return data;
 }
 
@@ -62,7 +97,11 @@ export async function getMe(): Promise<MeResponse> {
 }
 
 export function logout() {
-  if (typeof window !== 'undefined') localStorage.removeItem('chatcontrol_token');
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('chatcontrol_token');
+    localStorage.removeItem('chatcontrol_refresh_token');
+    window.location.href = '/login'; // Redirect to login on logout
+  }
 }
 
 export function isLoggedIn(): boolean {
@@ -90,6 +129,10 @@ export interface Message {
   text: string;
   timestamp: number;
   fromAi?: boolean;
+  type?: string;
+  mediaUrl?: string | null;
+  mimeType?: string | null;
+  fileName?: string | null;
 }
 
 /** Payload del evento WebSocket new_message (emitido por el backend al guardar un mensaje) */
@@ -112,8 +155,17 @@ export async function getConversation(id: string): Promise<{
   return api(`/chat/conversations/${id}`);
 }
 
-export async function getMessages(conversationId: string): Promise<Message[]> {
-  return api<Message[]>(`/chat/conversations/${conversationId}/messages`);
+export async function getMessages(conversationId: string, cursor?: string): Promise<{messages: Message[], nextCursor: string | null}> {
+  const q = cursor ? `?cursor=${cursor}` : '';
+  return api<{messages: Message[], nextCursor: string | null}>(`/chat/conversations/${conversationId}/messages${q}`);
+}
+
+export async function getGallery(conversationId: string): Promise<Message[]> {
+  return api<Message[]>(`/chat/conversations/${conversationId}/gallery`);
+}
+
+export async function searchMessages(conversationId: string, query: string): Promise<Message[]> {
+  return api<Message[]>(`/chat/conversations/${conversationId}/search?q=${encodeURIComponent(query)}`);
 }
 
 export async function markConversationAsRead(conversationId: string): Promise<void> {
@@ -357,6 +409,26 @@ export async function setPlatformOrganizationStatus(
   });
 }
 
+export async function renamePlatformOrganization(
+  id: string,
+  name: string,
+): Promise<{ id: string; name: string; status: string }> {
+  return api(`/platform/organizations/${id}/rename`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function resetPlatformAdminPassword(
+  organizationId: string,
+  newPassword: string,
+): Promise<{ success: boolean; adminEmail: string }> {
+  return api(`/platform/organizations/${organizationId}/reset-admin-password`, {
+    method: 'PATCH',
+    body: JSON.stringify({ newPassword }),
+  });
+}
+
 export interface PlatformAuditLogRow {
   id: string;
   action: string;
@@ -429,4 +501,21 @@ export async function createOrgUser(body: {
   role: 'ORG_ADMIN' | 'AGENT';
 }): Promise<{ id: string; email: string }> {
   return api('/org/users', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function updateOrgUser(
+  id: string,
+  body: { displayName?: string; role?: UserRole },
+): Promise<{ id: string; email: string }> {
+  return api(`/org/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+export async function resetOrgUserPassword(
+  id: string,
+  newPassword: string,
+): Promise<{ success: boolean }> {
+  return api(`/org/users/${id}/password`, {
+    method: 'PATCH',
+    body: JSON.stringify({ newPassword }),
+  });
 }
