@@ -115,7 +115,14 @@ export default function IntegrationsPage() {
       </header>
 
       {loading ? (
-        <div style={{ color: '#8C8C8C', textAlign: 'center', padding: '3rem' }}>Sincronizando integraciones...</div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '8rem 0', gap: '1.5rem' }}>
+          <div className="pulse-heartbeat">
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="#EF4444">
+              <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.4em' }}>Sincronizando Motores</span>
+        </div>
       ) : (
         <>
           {status && (

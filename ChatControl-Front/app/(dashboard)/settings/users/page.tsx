@@ -205,7 +205,7 @@ export default function OrgUsersPage() {
   return (
     <div style={{ padding: '2rem 3rem', width: '100%', margin: '0', position: 'relative' }}>
       <header style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 900, color: '#F2F2F2', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+        <h1 style={{ fontSize: '1.75rem', fontWeight: 900, color: '#F2F2F2', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
           Gestión de Usuarios
         </h1>
         <p style={{ color: '#666', fontSize: '0.85rem' }}>Administra tu equipo y sus niveles de acceso.</p>
@@ -251,7 +251,14 @@ export default function OrgUsersPage() {
       </div>
 
       {loading ? (
-        <div style={{ color: '#444', textAlign: 'center', padding: '3rem', fontSize: '0.85rem', fontWeight: 800 }}>SINCRONIZANDO EQUIPO...</div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '8rem 0', gap: '1.5rem' }}>
+          <div className="pulse-heartbeat">
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="#EF4444">
+              <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.4em' }}>Sincronizando Equipo</span>
+        </div>
       ) : (
         <>
           <div style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, overflow: 'hidden' }}>

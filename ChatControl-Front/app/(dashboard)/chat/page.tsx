@@ -123,9 +123,12 @@ export default function ChatPage() {
     return () => { socket.disconnect(); };
   }, [mounted]);
 
+  const [loadingMessages, setLoadingMessages] = useState(false);
+
   useEffect(() => {
     if (!selectedId) return;
     (async () => {
+      setLoadingMessages(true);
       try {
         const [convRes, msgRes] = await Promise.all([
           getConversation(selectedId),
@@ -135,7 +138,9 @@ export default function ChatPage() {
         setNextCursor(msgRes.nextCursor);
         setCanSend(convRes.canSend ?? false);
         markConversationAsRead(selectedId);
-      } catch (err) {}
+      } catch (err) {} finally {
+        setLoadingMessages(false);
+      }
     })();
   }, [selectedId]);
 
@@ -216,7 +221,14 @@ export default function ChatPage() {
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }} className="custom-scrollbar">
           {loading ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: '#444', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 800 }}>Sincronizando...</div>
+            <div style={{ padding: '4rem 2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
+              <div className="pulse-heartbeat">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="#EF4444">
+                  <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.2em' }}>Sincronizando</span>
+            </div>
           ) : filteredConversations.map(c => (
             <button 
               key={c.id}
@@ -289,33 +301,46 @@ export default function ChatPage() {
             {/* Mensajes */}
             <div 
               ref={messagesContainerRef}
-              style={{ flex: 1, overflowY: 'auto', padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }} 
+              style={{ flex: 1, overflowY: 'auto', padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', position: 'relative' }} 
               className="custom-scrollbar"
             >
-              <div style={{ alignSelf: 'center', background: 'rgba(255,255,255,0.03)', padding: '0.4rem 1rem', borderRadius: '20px', fontSize: '0.7rem', color: '#444', fontWeight: 700, textTransform: 'uppercase' }}>Hoy</div>
-              
-              {messages.map((m) => {
-                const isAgent = !m.fromUser;
-                return (
-                  <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAgent ? 'flex-end' : 'flex-start', maxWidth: '75%', alignSelf: isAgent ? 'flex-end' : 'flex-start' }}>
-                    <div style={{ 
-                      padding: '1rem 1.25rem', 
-                      borderRadius: isAgent ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
-                      background: isAgent ? 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)' : '#1A1A1A',
-                      color: 'white',
-                      fontSize: '0.95rem',
-                      lineHeight: '1.5',
-                      boxShadow: isAgent ? '0 10px 25px rgba(239, 68, 68, 0.15)' : 'none',
-                      border: isAgent ? 'none' : '1px solid rgba(255,255,255,0.05)'
-                    }}>
-                      {m.text}
-                    </div>
-                    <span style={{ fontSize: '0.65rem', color: '#444', marginTop: '0.4rem', fontWeight: 700 }}>
-                      {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
+              {loadingMessages ? (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#040404', zIndex: 5 }}>
+                   <div className="pulse-heartbeat">
+                    <svg width="60" height="60" viewBox="0 0 24 24" fill="#EF4444">
+                      <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
                   </div>
-                );
-              })}
+                  <p style={{ marginTop: '1.5rem', fontSize: '0.7rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.4em' }}>Sincronizando Conversación</p>
+                </div>
+              ) : (
+                <>
+                  <div style={{ alignSelf: 'center', background: 'rgba(255,255,255,0.03)', padding: '0.4rem 1rem', borderRadius: '20px', fontSize: '0.7rem', color: '#444', fontWeight: 700, textTransform: 'uppercase' }}>Hoy</div>
+                  
+                  {messages.map((m) => {
+                    const isAgent = !m.fromUser;
+                    return (
+                      <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAgent ? 'flex-end' : 'flex-start', maxWidth: '75%', alignSelf: isAgent ? 'flex-end' : 'flex-start' }}>
+                        <div style={{ 
+                          padding: '1rem 1.25rem', 
+                          borderRadius: isAgent ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
+                          background: isAgent ? 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)' : '#1A1A1A',
+                          color: 'white',
+                          fontSize: '0.95rem',
+                          lineHeight: '1.5',
+                          boxShadow: isAgent ? '0 10px 25px rgba(239, 68, 68, 0.15)' : 'none',
+                          border: isAgent ? 'none' : '1px solid rgba(255,255,255,0.05)'
+                        }}>
+                          {m.text}
+                        </div>
+                        <span style={{ fontSize: '0.65rem', color: '#444', marginTop: '0.4rem', fontWeight: 700 }}>
+                          {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
               {typingHint && (
                 <div style={{ alignSelf: 'flex-start', color: '#EF4444', fontSize: '0.75rem', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <div className="typing-dot"></div>
@@ -385,6 +410,17 @@ export default function ChatPage() {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #EF4444; }
         
+        .pulse-heartbeat {
+          animation: heartbeat 1.5s ease-in-out infinite;
+          filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.4));
+        }
+
+        @keyframes heartbeat {
+          0% { transform: scale(0.9); opacity: 0.4; }
+          50% { transform: scale(1.1); opacity: 1; }
+          100% { transform: scale(0.9); opacity: 0.4; }
+        }
+
         @keyframes typing {
           0% { opacity: .2; }
           20% { opacity: 1; }

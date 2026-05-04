@@ -128,7 +128,14 @@ export default function SettingsPage() {
       {success && <div style={{ padding: '1rem', background: 'rgba(74, 222, 128, 0.1)', border: '1px solid rgba(74, 222, 128, 0.2)', borderRadius: 12, color: '#4ADE80', marginBottom: '1.5rem', fontSize: '0.85rem' }}>{success}</div>}
       
       {loading ? (
-        <div style={{ color: '#8C8C8C', textAlign: 'center', padding: '3rem' }}>Sincronizando con el servidor...</div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '8rem 0', gap: '1.5rem' }}>
+          <div className="pulse-heartbeat">
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="#EF4444">
+              <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.4em' }}>Sincronizando con el servidor</span>
+        </div>
       ) : (
         <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           

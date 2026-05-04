@@ -230,7 +230,27 @@ export function OrganizationsPage() {
     } catch (err) {}
   }
 
-  if (loading) return <p className="p-8 text-[#8C8C8C] text-sm italic">Cargando…</p>;
+  // El loading inicial solo bloquea si no tenemos el perfil 'me'
+  if (loading && !me) return (
+    <div className="flex-1 h-screen bg-[#040404] flex flex-col items-center justify-center">
+      <div className="pulse-logo mb-4">
+        <svg width="60" height="60" viewBox="0 0 24 24" fill="#EF4444">
+          <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+      </div>
+      <style jsx>{`
+        .pulse-logo {
+          animation: pulse 1.5s ease-in-out infinite;
+          filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.5));
+        }
+        @keyframes pulse {
+          0% { transform: scale(0.95); opacity: 0.5; }
+          50% { transform: scale(1.1); opacity: 1; }
+          100% { transform: scale(0.95); opacity: 0.5; }
+        }
+      `}</style>
+    </div>
+  );
 
   const filteredOrgs = orgs.filter(o => {
     const matchesSearch = o.name.toLowerCase().includes(orgSearch.toLowerCase());
@@ -308,7 +328,25 @@ export function OrganizationsPage() {
             </div>
 
             {loadingOrgs ? (
-              <div className="text-[#666] text-center py-12 text-sm italic">Sincronizando ecosistema...</div>
+              <div className="flex flex-col items-center justify-center py-20 bg-white/[0.02] border border-white/10 rounded-2xl">
+                <div className="pulse-logo-mini mb-4">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="#EF4444">
+                    <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <p className="text-[10px] font-black text-[#444] uppercase tracking-[0.2em] animate-pulse">Sincronizando Datos</p>
+                <style jsx>{`
+                  .pulse-logo-mini {
+                    animation: pulse 1.5s ease-in-out infinite;
+                    filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.3));
+                  }
+                  @keyframes pulse {
+                    0% { transform: scale(0.9); opacity: 0.4; }
+                    50% { transform: scale(1.1); opacity: 1; }
+                    100% { transform: scale(0.9); opacity: 0.4; }
+                  }
+                `}</style>
+              </div>
             ) : (
               <>
                 <div className="bg-white/[0.02] border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
@@ -416,7 +454,7 @@ export function OrganizationsPage() {
           <section>
             <h2 className="text-2xl font-black text-white mb-6 uppercase tracking-tight">Auditoría Global</h2>
             <div className="bg-[#0d0d0d] p-6 rounded-2xl border border-white/5 shadow-2xl">
-              <PlatformAuditTable audit={audit} organizations={orgs} selectedOrgId={selectedOrgIdForAudit} onChangeOrganizationId={setSelectedOrgIdForAudit} />
+              <PlatformAuditTable audit={audit} organizations={orgs} selectedOrgId={selectedOrgIdForAudit} onChangeOrganizationId={setSelectedOrgIdForAudit} loading={loadingAudit} />
             </div>
           </section>
         )}

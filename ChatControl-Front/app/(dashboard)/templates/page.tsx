@@ -123,7 +123,14 @@ export default function TemplatesPage() {
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }} className="custom-scrollbar">
           {loading ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: '#444', fontSize: '0.8rem', fontWeight: 800 }}>Accediendo a Meta...</div>
+            <div style={{ padding: '4rem 2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
+              <div className="pulse-heartbeat">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="#EF4444">
+                  <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.2em' }}>Accediendo a Meta</span>
+            </div>
           ) : templates.length === 0 ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: '#444', fontSize: '0.85rem' }}>No se encontraron plantillas.</div>
           ) : (
@@ -168,6 +175,7 @@ export default function TemplatesPage() {
 
           {selectedTemplate ? (
             <>
+              {/* Contenido de la plantilla ya existente... */}
               <header style={{ marginBottom: '3rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
@@ -220,9 +228,9 @@ export default function TemplatesPage() {
               </div>
             </>
           ) : (
-            <div style={{ flex: 1, height: '60vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.2 }}>
-              <TemplateIcon style={{ width: '4rem', height: '4rem', marginBottom: '1.5rem' }} />
-              <p style={{ fontSize: '0.9rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.2em' }}>Selecciona una plantilla para previsualizar</p>
+            <div style={{ flex: 1, height: '60vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.3 }}>
+              <Image src="/assets/images/NOIRLINE2.png" alt="Nextline" width={120} height={120} style={{ filter: 'grayscale(1)', marginBottom: '2rem' }} />
+              <p style={{ fontSize: '0.9rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.2em', color: '#8C8C8C' }}>Selecciona una plantilla para previsualizar</p>
             </div>
           )}
         </div>
@@ -234,6 +242,17 @@ export default function TemplatesPage() {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #EF4444; }
         
+        .pulse-heartbeat {
+          animation: heartbeat 1.5s ease-in-out infinite;
+          filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.4));
+        }
+
+        @keyframes heartbeat {
+          0% { transform: scale(0.9); opacity: 0.4; }
+          50% { transform: scale(1.1); opacity: 1; }
+          100% { transform: scale(0.9); opacity: 0.4; }
+        }
+
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }

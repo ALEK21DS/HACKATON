@@ -166,7 +166,14 @@ export default function BroadcastPage() {
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }} className="custom-scrollbar">
           {loading ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: '#444', fontSize: '0.8rem', fontWeight: 800 }}>Cargando audiencia...</div>
+            <div style={{ padding: '4rem 2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
+              <div className="pulse-heartbeat">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="#EF4444">
+                  <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.2em' }}>Cargando Audiencia</span>
+            </div>
           ) : filteredContacts.map(c => (
             <div 
               key={c.id}
@@ -347,6 +354,17 @@ export default function BroadcastPage() {
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #EF4444; }
+
+        .pulse-heartbeat {
+          animation: heartbeat 1.5s ease-in-out infinite;
+          filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.4));
+        }
+
+        @keyframes heartbeat {
+          0% { transform: scale(0.9); opacity: 0.4; }
+          50% { transform: scale(1.1); opacity: 1; }
+          100% { transform: scale(0.9); opacity: 0.4; }
+        }
       `}</style>
     </div>
   );

@@ -34,9 +34,11 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const pathname = usePathname();
   const router = useRouter();
   const [me, setMe] = useState<MeResponse | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getMe().then(setMe).catch(() => {});
+    setLoading(true);
+    getMe().then(setMe).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const handleLogout = () => {
@@ -49,30 +51,41 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   return (
     <div style={{ display: 'flex', flex: 1, minWidth: 0, overflow: 'hidden' }}>
       <aside className={styles.sidebar}>
-        <div style={{ padding: '2.5rem 1.5rem', textAlign: 'center', borderBottom: '1px solid rgba(64,64,64,0.2)' }}>
-          <div style={{ 
-            width: 80, 
-            height: 80, 
-            borderRadius: '50%', 
-            background: 'rgba(239, 68, 68, 0.1)', 
-            color: '#EF4444', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center',
-            margin: '0 auto 1.25rem'
-          }}>
-            <PersonIcon className="w-10 h-10" />
+        {loading ? (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1.5rem' }}>
+            <div className="pulse-heartbeat">
+              <svg width="60" height="60" viewBox="0 0 24 24" fill="#EF4444">
+                <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.3em' }}>Sincronizando Perfil</span>
           </div>
-          <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#F2F2F2', margin: '0 0 0.25rem' }}>
-            {me?.role === 'AGENT' 
-              ? (me?.displayName || 'Agente') 
-              : (me?.organizationName || 'Cargando...')
-            }
-          </h2>
-          <p style={{ fontSize: '0.75rem', color: '#8C8C8C', margin: 0 }}>
-            {me?.email || ''}
-          </p>
-        </div>
+        ) : (
+          <>
+            <div style={{ padding: '2.5rem 1.5rem', textAlign: 'center', borderBottom: '1px solid rgba(64,64,64,0.2)' }}>
+              <div style={{ 
+                width: 80, 
+                height: 80, 
+                borderRadius: '50%', 
+                background: 'rgba(239, 68, 68, 0.1)', 
+                color: '#EF4444', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                margin: '0 auto 1.25rem'
+              }}>
+                <PersonIcon className="w-10 h-10" />
+              </div>
+              <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#F2F2F2', margin: '0 0 0.25rem' }}>
+                {me?.role === 'AGENT' 
+                  ? (me?.displayName || 'Agente') 
+                  : (me?.organizationName || 'Organización')
+                }
+              </h2>
+              <p style={{ fontSize: '0.75rem', color: '#8C8C8C', margin: 0 }}>
+                {me?.email || ''}
+              </p>
+            </div>
 
         <nav style={{ flex: 1, padding: '1rem' }}>
           <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -105,26 +118,52 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                     <span className={styles.navLabel}>Usuarios</span>
                   </Link>
                 </li>
+                <li>
+                  <Link 
+                    href="/settings/assignment" 
+                    className={isActive('/settings/assignment') ? styles.navItemActive : styles.navItem}
+                  >
+                    <svg width="1.1rem" height="1.1rem" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: '0.2rem' }}>
+                      <path d="M16 17V19H2V17H16ZM22 12V14H2V12H22ZM16 7V9H2V7H16Z" />
+                    </svg>
+                    <span className={styles.navLabel}>Asignación de Chats</span>
+                  </Link>
+                </li>
               </>
             )}
           </ul>
         </nav>
 
-        <div style={{ padding: '1rem', borderTop: '1px solid rgba(64,64,64,0.2)' }}>
-          <button 
-            onClick={handleLogout}
-            className={styles.navItem}
-            style={{ width: '100%', color: '#EF4444' }}
-          >
-            <LogoutIcon />
-            <span className={styles.navLabel}>Cerrar Sesión</span>
-          </button>
-        </div>
+            <div style={{ padding: '1rem', borderTop: '1px solid rgba(64,64,64,0.2)' }}>
+              <button 
+                onClick={handleLogout}
+                className={styles.navItem}
+                style={{ width: '100%', color: '#EF4444' }}
+              >
+                <LogoutIcon />
+                <span className={styles.navLabel}>Cerrar Sesión</span>
+              </button>
+            </div>
+          </>
+        )}
       </aside>
 
       <main className={styles.main} style={{ flex: 1, display: 'flex', minWidth: 0 }}>
         {children}
       </main>
+
+      <style jsx global>{`
+        .pulse-heartbeat {
+          animation: heartbeat 1.5s ease-in-out infinite;
+          filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.4));
+        }
+
+        @keyframes heartbeat {
+          0% { transform: scale(0.9); opacity: 0.4; }
+          50% { transform: scale(1.1); opacity: 1; }
+          100% { transform: scale(0.9); opacity: 0.4; }
+        }
+      `}</style>
     </div>
   );
 }
