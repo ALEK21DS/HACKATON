@@ -1,5 +1,4 @@
-'use client';
-
+import { Suspense } from 'react';
 import Sidebar from '@/app/components/Sidebar';
 import styles from '@/app/(dashboard)/chat/chat.module.css';
 
@@ -10,8 +9,12 @@ export default function DashboardLayout({
 }) {
   return (
     <div className={styles.layout}>
-      <Sidebar />
-      {children}
+      <Suspense fallback={null}>
+        <Sidebar />
+      </Suspense>
+      <Suspense fallback={null}>
+        {children}
+      </Suspense>
     </div>
   );
 }
