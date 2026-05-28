@@ -80,31 +80,45 @@ export default function LoginPage() {
     <div ref={containerRef} className="viewport-container min-h-screen relative flex items-center justify-center p-4 sm:p-6 bg-[#040404]" suppressHydrationWarning>
       {/* Subtle tech triangle/ray background */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0 opacity-[0.04]" style={{ backgroundImage: "linear-gradient(45deg, #EF4444 1px, transparent 1px), linear-gradient(135deg, #EF4444 1px, transparent 1px)", backgroundSize: "60px 60px" }}></div>
+      <div className="fixed inset-0 pointer-events-none z-0">
+        <div className="absolute top-14 left-1/2 h-[260px] w-[260px] -translate-x-1/2 rounded-full bg-[#EF4444]/10 blur-3xl" />
+        <div className="absolute bottom-14 right-10 h-[180px] w-[180px] rounded-full bg-white/5 blur-3xl" />
+      </div>
 
       {/* Main Content Scrollable Area */}
       <main className="relative z-10 w-full max-w-[440px] flex flex-col items-center py-10">
 
         {/* Brand Identity Section */}
-        <div className="brand-header text-center mb-8 relative">
+        <div className="brand-header text-center mb-10 relative">
+          <div className="inline-flex items-center justify-center px-3 py-1.5 rounded-full bg-[#EF4444]/10 text-[#EF4444] text-[10px] uppercase tracking-[0.25em] font-bold mb-4">
+            <span className="h-2 w-2 rounded-full bg-[#EF4444]" />
+            Plataforma empresarial
+          </div>
           <div className="flex justify-center mb-4">
             <Image
               src="/assets/images/NOIRLINE2.png"
-              alt="ChatControl"
+              alt="Nextline"
               width={150}
               height={150}
               className="w-[150px] h-[150px] object-contain drop-shadow-[0_0_20px_rgba(239,68,68,0.5)]"
               priority
             />
           </div>
-          <h1 className="font-headline font-black text-4xl sm:text-5xl text-[#EF4444] brand-text uppercase mb-2 tracking-tight">Nextline</h1>
-          <p className="font-headline text-[10px] sm:text-xs tracking-[0.4em] uppercase text-[#8C8C8C] font-bold">Plataforma de comunicación</p>
+          <h1 className="font-headline font-black text-4xl sm:text-5xl text-white uppercase mb-3 tracking-tight">Nextline</h1>
+          <p className="max-w-[300px] mx-auto text-sm sm:text-base text-[#D4D4D8]/80 leading-6">Control inteligente de conversaciones, clientes y operaciones desde un mismo panel seguro.</p>
         </div>
 
         {/* Login Card */}
-        <div className="login-card w-full bg-[#0d0d0d] p-8 sm:p-10 rounded-2xl border border-white/5 shadow-[0_0_60px_rgba(0,0,0,0.8)] relative">
-          <div className="mb-8">
-            <h2 className="font-headline text-xl sm:text-2xl font-bold text-on-surface mb-2">Acceso al Sistema</h2>
-            <p className="text-xs sm:text-sm text-[#8C8C8C]/80">Ingresa tus credenciales para continuar.</p>
+        <div className="login-card w-full bg-white/5 backdrop-blur-2xl p-8 sm:p-10 rounded-[32px] border border-white/10 shadow-[0_25px_80px_rgba(0,0,0,0.45)] relative overflow-hidden">
+          <div className="absolute -top-12 -right-12 h-36 w-36 rounded-full bg-[#EF4444]/10 blur-3xl pointer-events-none" />
+          <div className="absolute bottom-0 left-0 h-32 w-32 rounded-full bg-white/5 blur-3xl pointer-events-none" />
+          <div className="mb-8 relative z-10">
+            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#EF4444]/10 text-[#EF4444] text-[10px] uppercase tracking-[0.3em] font-bold mb-4">
+              <span className="h-2 w-2 rounded-full bg-[#EF4444]" />
+              Acceso seguro
+            </span>
+            <h2 className="font-headline text-2xl sm:text-3xl font-extrabold text-white mb-2">Bienvenido de nuevo</h2>
+            <p className="text-sm text-[#D4D4D8]/80 max-w-[360px]">Inicia sesión para acceder al panel de Nextline y administrar tus conversaciones con toda seguridad.</p>
           </div>
 
           <form className="space-y-6 sm:space-y-8" onSubmit={handleSubmit}>
@@ -200,47 +214,38 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className={`login-submit-btn relative w-full min-h-[48px] rounded-md text-white font-headline font-extrabold text-sm uppercase tracking-[0.2em] active:scale-[0.98] flex items-center justify-center overflow-hidden mt-6 sm:mt-8 ${loading ? 'opacity-80 cursor-wait' : ''}`}
+              className={`login-submit-btn relative w-full min-h-[52px] rounded-full text-white font-headline font-extrabold text-sm uppercase tracking-[0.24em] active:scale-[0.98] flex items-center justify-center overflow-hidden mt-6 sm:mt-8 transition-transform duration-200 ${loading ? 'opacity-80 cursor-wait' : 'hover:-translate-y-[1px]'}`}
+              style={{ backgroundImage: 'linear-gradient(135deg, #EF4444, #FB7185 45%, #F97316)' }}
             >
               {loading ? (
                 <span className="relative z-[1] py-3.5">ENTRANDO...</span>
               ) : (
-                <>
-                  <span className="login-submit-label inline-flex items-center justify-center py-3.5">
-                    ENTRAR
+                <span className="relative z-[1] inline-flex items-center gap-3 py-3.5">
+                  <span>ENTRAR</span>
+                  <span className="inline-flex items-center justify-center rounded-full bg-white/15 p-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-white">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                    </svg>
                   </span>
-                  <span className="login-submit-arrow" aria-hidden>
-                    <Image
-                      src="/assets/images/ICONO-NEXTBLANCO.png"
-                      alt="Next"
-                      width={32}
-                      height={32}
-                      className="login-arrow-svg h-6 w-[3.25rem] object-contain shrink-0"
-                      priority
-                    />
-                  </span>
-                </>
+                </span>
               )}
             </button>
           </form>
 
           <div className="mt-8 pt-6 border-t border-[#404040]/30 min-h-[40px]">
-            <div className="flex items-center justify-center">
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto] items-center">
+              <div>
+                <p className="text-xs text-[#D4D4D8]/70">¿No estás seguro de qué credenciales usar? Contacta con el administrador de tu organización.</p>
+              </div>
               <button
                 type="button"
                 onClick={() => { setLegacyMode(!legacyMode); setError(''); }}
-                className="flex items-center space-x-2 text-[#8C8C8C] hover:text-[#EF4444] transition-colors group"
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#111111]/90 px-4 py-3 text-[#D4D4D8] hover:border-[#EF4444]/40 hover:text-white transition-all duration-200"
               >
-                {legacyMode ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
-                  </svg>
-                ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-2.896-1.596-5.265-3.965-6.861-6.86l1.294-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
-                  </svg>
-                )}
-                <span className="text-[9px] font-label uppercase tracking-[0.1em] font-extrabold">{legacyMode ? 'ACCESO CON CORREO' : 'ACCESO CON NÚMERO (LEGACY)'}</span>
+                <span className="flex h-2.5 w-2.5 rounded-full bg-[#EF4444]" />
+                <span className="text-[10px] uppercase tracking-[0.25em] font-semibold">
+                  {legacyMode ? 'Acceso con correo' : 'Acceso con teléfono'}
+                </span>
               </button>
             </div>
           </div>

@@ -2,6 +2,7 @@
   "name": "chatcontrol-front",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "pnpm@11.0.8",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
