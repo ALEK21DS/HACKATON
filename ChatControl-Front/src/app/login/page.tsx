@@ -1,14 +1,75 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { login, loginLegacy, getMe } from '@/lib/api';
 import gsap from 'gsap';
+import { getMe, login, loginLegacy } from '@/lib/api';
+
+type LoginMode = 'email' | 'phone';
+
+const quickSignals = [
+  { label: 'Inbox', value: 'Tiempo real' },
+  { label: 'Equipos', value: 'Multiempresa' },
+  { label: 'IA', value: 'Gemini listo' },
+];
+
+function MailIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4.75 6.75h14.5v10.5H4.75z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m5.25 7.25 6.75 5 6.75-5" />
+    </svg>
+  );
+}
+
+function PhoneIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7.7 4.5 9.1 8c.25.62.06 1.33-.47 1.73l-1.12.84a11.4 11.4 0 0 0 5.92 5.92l.84-1.12c.4-.53 1.11-.72 1.73-.47l3.5 1.4c.58.23.94.82.86 1.44l-.22 1.73c-.08.6-.55 1.07-1.15 1.15C10.4 21.83 2.17 13.6 3.38 5.01c.08-.6.55-1.07 1.15-1.15l1.73-.22c.62-.08 1.21.28 1.44.86Z" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 10.25V8a5 5 0 0 1 10 0v2.25" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 10.25h12v9H6z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 14v2" />
+    </svg>
+  );
+}
+
+function EyeIcon({ hidden }: { hidden: boolean }) {
+  return hidden ? (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m4 4 16 16" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.5 5.55A9.4 9.4 0 0 1 12 5.2c4.1 0 7.44 2.67 8.85 6.3a9.95 9.95 0 0 1-2.36 3.48" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14.12 14.12A3 3 0 0 1 9.88 9.88" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6.62 6.65A10.1 10.1 0 0 0 3.15 11.5c1.41 3.63 4.75 6.3 8.85 6.3 1.02 0 2-.17 2.91-.48" />
+    </svg>
+  ) : (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.15 11.5c1.41-3.63 4.75-6.3 8.85-6.3s7.44 2.67 8.85 6.3c-1.41 3.63-4.75 6.3-8.85 6.3s-7.44-2.67-8.85-6.3Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 11.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+    </svg>
+  );
+}
+
+function ArrowIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m13 6 6 6-6 6" />
+    </svg>
+  );
+}
 
 export default function LoginPage() {
   const router = useRouter();
-  const [legacyMode, setLegacyMode] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [mode, setMode] = useState<LoginMode>('email');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -16,253 +77,222 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  const isPhoneMode = mode === 'phone';
 
   useEffect(() => {
-    // GSAP Intro Animations
-    let ctx = gsap.context(() => {
-      gsap.from('.brand-header > *', {
-        y: 20,
-        opacity: 0,
-        duration: 1,
-        stagger: 0.15,
-        ease: 'power3.out'
-      });
+    const mm = gsap.matchMedia();
 
-      gsap.from('.login-card', {
-        y: 30,
-        opacity: 0,
-        duration: 1.2,
-        delay: 0.3,
-        ease: 'power3.out'
-      });
+    mm.add(
+      {
+        reduceMotion: '(prefers-reduced-motion: reduce)',
+        desktop: '(min-width: 900px)',
+      },
+      (context) => {
+        const { reduceMotion, desktop } = context.conditions ?? {};
+        if (reduceMotion) return;
 
-      gsap.from('.side-decor', {
-        opacity: 0,
-        duration: 1.5,
-        delay: 0.8,
-        ease: 'power3.out'
-      });
-    }, containerRef);
+        const timeline = gsap.timeline({ defaults: { ease: 'power3.out' } });
+        timeline
+          .from('.login-shell', { autoAlpha: 0, duration: 0.45 })
+          .from('.brand-panel', { x: desktop ? -28 : 0, y: desktop ? 0 : 18, autoAlpha: 0, duration: 0.7 }, '-=0.15')
+          .from('.auth-panel', { x: desktop ? 28 : 0, y: desktop ? 0 : 18, autoAlpha: 0, duration: 0.7 }, '-=0.5')
+          .from('.login-stagger', { y: 14, autoAlpha: 0, duration: 0.45, stagger: 0.06 }, '-=0.35');
+      },
+      containerRef,
+    );
 
-    return () => ctx.revert();
+    return () => mm.revert();
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     setLoading(true);
+
     try {
-      if (legacyMode) {
+      if (isPhoneMode) {
         await loginLegacy(phone, password);
       } else {
         await login(email, password);
       }
+
       const me = await getMe();
-      if (me.role === 'SUPER_ADMIN') {
-        router.replace('/platform');
-      } else {
-        router.replace('/chat');
-      }
+      router.replace(me.role === 'SUPER_ADMIN' ? '/platform' : '/chat');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al iniciar sesión');
-      // Shake animation on error using GSAP
-      gsap.fromTo('.login-card',
-        { x: -5 },
-        { x: 5, duration: 0.05, yoyo: true, repeat: 5, ease: 'none', onComplete: () => gsap.set('.login-card', { x: 0 }) }
-      );
+      setError(err instanceof Error ? err.message : 'No se pudo iniciar sesion. Revisa tus credenciales.');
+      gsap.fromTo('.auth-panel', { x: -5 }, { x: 5, duration: 0.06, yoyo: true, repeat: 4, ease: 'none', clearProps: 'transform' });
     } finally {
       setLoading(false);
     }
   }
 
+  function switchMode(nextMode: LoginMode) {
+    setMode(nextMode);
+    setError('');
+  }
+
   return (
-    <div ref={containerRef} className="viewport-container min-h-screen relative flex items-center justify-center p-4 sm:p-6 bg-[#040404]" suppressHydrationWarning>
-      {/* Subtle tech triangle/ray background */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0 opacity-[0.04]" style={{ backgroundImage: "linear-gradient(45deg, #EF4444 1px, transparent 1px), linear-gradient(135deg, #EF4444 1px, transparent 1px)", backgroundSize: "60px 60px" }}></div>
-      <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-14 left-1/2 h-[260px] w-[260px] -translate-x-1/2 rounded-full bg-[#EF4444]/10 blur-3xl" />
-        <div className="absolute bottom-14 right-10 h-[180px] w-[180px] rounded-full bg-white/5 blur-3xl" />
-      </div>
+    <main ref={containerRef} className="login-shell min-h-dvh overflow-hidden bg-[#040404] text-[#f2f2f2]">
+      <div className="login-grid-bg fixed inset-0 pointer-events-none" />
 
-      {/* Main Content Scrollable Area */}
-      <main className="relative z-10 w-full max-w-[440px] flex flex-col items-center py-10">
+      <section className="relative z-10 grid min-h-dvh grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(430px,520px)]">
+        <div className="brand-panel relative flex min-h-[42dvh] flex-col justify-between overflow-hidden border-b border-white/10 px-6 py-7 sm:px-10 lg:min-h-dvh lg:border-b-0 lg:border-r lg:border-[#ef4444]/20">
+          <div className="login-scanline absolute inset-0 pointer-events-none" />
+          <div className="login-redline absolute right-0 top-0 hidden h-full w-px lg:block" />
+          <Image
+            src="/assets/images/NOIRLINE.png"
+            alt=""
+            width={720}
+            height={720}
+            className="login-hero-mark pointer-events-none absolute -right-28 top-1/2 hidden w-[52vw] max-w-[760px] -translate-y-1/2 select-none object-contain lg:block"
+            priority
+          />
+          <div className="relative flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="login-logo-tile flex h-[52px] w-[52px] items-center justify-center rounded-lg border border-white/15 bg-white/[0.04]">
+                <Image src="/assets/images/NOIRLINE2.png" alt="Nextline" width={34} height={34} className="h-8 w-8 object-contain" priority />
+              </div>
+              <div>
+                <p className="text-base font-extrabold text-white">Nextline</p>
+                <p className="text-sm text-[#8c8c8c]">ChatControl Console</p>
+              </div>
+            </div>
+            <div className="hidden rounded-full border border-[#ef4444]/35 bg-[#ef4444]/10 px-3 py-1.5 text-sm font-semibold text-[#ffdad7] shadow-[0_0_28px_rgba(239,68,68,0.16)] sm:block">
+              Online
+            </div>
+          </div>
 
-        {/* Brand Identity Section */}
-        <div className="brand-header text-center mb-10 relative">
-          <div className="inline-flex items-center justify-center px-3 py-1.5 rounded-full bg-[#EF4444]/10 text-[#EF4444] text-[10px] uppercase tracking-[0.25em] font-bold mb-4">
-            <span className="h-2 w-2 rounded-full bg-[#EF4444]" />
-            Plataforma empresarial
+          <div className="relative max-w-3xl py-12 sm:py-16 lg:py-0">
+            <div className="login-gloss-pill mb-7 inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-2 text-sm text-[#f2f2f2]">
+              <span className="h-2 w-2 rounded-full bg-[#ef4444] shadow-[0_0_16px_rgba(239,68,68,0.8)]" />
+              Centro operativo para WhatsApp e IA
+            </div>
+            <h1 className="max-w-3xl text-5xl font-black leading-[0.9] text-white sm:text-6xl lg:text-7xl">
+              Control total, respuesta inmediata.
+            </h1>
+            <p className="mt-6 max-w-2xl text-base leading-7 text-[#d4d4d8] sm:text-lg">
+              Entra al panel para coordinar conversaciones, agentes, integraciones y auditoria con la identidad visual oscura de ChatControl.
+            </p>
           </div>
-          <div className="flex justify-center mb-4">
-            <Image
-              src="/assets/images/NOIRLINE2.png"
-              alt="Nextline"
-              width={150}
-              height={150}
-              className="w-[150px] h-[150px] object-contain drop-shadow-[0_0_20px_rgba(239,68,68,0.5)]"
-              priority
-            />
+
+          <div className="relative grid gap-3 sm:grid-cols-3">
+            {quickSignals.map((item) => (
+              <div key={item.label} className="login-stat-card rounded-lg border border-white/10 p-4">
+                <p className="text-sm text-[#8c8c8c]">{item.label}</p>
+                <p className="mt-2 text-base font-bold text-white">{item.value}</p>
+              </div>
+            ))}
           </div>
-          <h1 className="font-headline font-black text-4xl sm:text-5xl text-white uppercase mb-3 tracking-tight">Nextline</h1>
-          <p className="max-w-[300px] mx-auto text-sm sm:text-base text-[#D4D4D8]/80 leading-6">Control inteligente de conversaciones, clientes y operaciones desde un mismo panel seguro.</p>
         </div>
 
-        {/* Login Card */}
-        <div className="login-card w-full bg-white/5 backdrop-blur-2xl p-8 sm:p-10 rounded-[32px] border border-white/10 shadow-[0_25px_80px_rgba(0,0,0,0.45)] relative overflow-hidden">
-          <div className="absolute -top-12 -right-12 h-36 w-36 rounded-full bg-[#EF4444]/10 blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 left-0 h-32 w-32 rounded-full bg-white/5 blur-3xl pointer-events-none" />
-          <div className="mb-8 relative z-10">
-            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#EF4444]/10 text-[#EF4444] text-[10px] uppercase tracking-[0.3em] font-bold mb-4">
-              <span className="h-2 w-2 rounded-full bg-[#EF4444]" />
-              Acceso seguro
-            </span>
-            <h2 className="font-headline text-2xl sm:text-3xl font-extrabold text-white mb-2">Bienvenido de nuevo</h2>
-            <p className="text-sm text-[#D4D4D8]/80 max-w-[360px]">Inicia sesión para acceder al panel de Nextline y administrar tus conversaciones con toda seguridad.</p>
-          </div>
+        <div className="flex items-center justify-center px-4 py-8 sm:px-8 lg:px-10">
+          <div className="auth-panel login-gloss-panel relative w-full max-w-[440px] overflow-hidden rounded-lg p-5 sm:p-7">
+            <div className="login-reflection pointer-events-none absolute inset-x-0 top-0 h-24" />
+            <div className="login-stagger mb-7 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-[#ffdad7]">Acceso seguro</p>
+                <h2 className="mt-2 text-3xl font-black leading-tight text-white">Bienvenido de vuelta</h2>
+              </div>
+              <Image src="/assets/images/krakedev_logo-ByJvfRFA.png" alt="Krakedev" width={82} height={48} className="mt-1 h-auto w-20 object-contain opacity-80" />
+            </div>
 
-          <form className="space-y-6 sm:space-y-8" onSubmit={handleSubmit}>
-            {!legacyMode ? (
-              <div className="space-y-2">
-                <label className="font-label text-[10px] uppercase tracking-widest text-[#8C8C8C] font-bold ml-1">Correo electrónico</label>
-                <div className="relative group">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-[#8C8C8C]/40 group-focus-within:text-[#EF4444] transition-colors">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
-                    </svg>
-                  </div>
+            <div className="login-stagger mb-6 grid grid-cols-2 rounded-lg border border-white/10 bg-black/35 p-1 shadow-inner shadow-black/60">
+              <button
+                type="button"
+                onClick={() => switchMode('email')}
+                className={`min-h-11 rounded-md px-3 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444] ${!isPhoneMode ? 'bg-[#f5f2ee] text-[#161311]' : 'text-[#b7aea6] hover:text-white'}`}
+                aria-pressed={!isPhoneMode}
+              >
+                Correo
+              </button>
+              <button
+                type="button"
+                onClick={() => switchMode('phone')}
+                className={`min-h-11 rounded-md px-3 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444] ${isPhoneMode ? 'bg-[#f5f2ee] text-[#161311]' : 'text-[#b7aea6] hover:text-white'}`}
+                aria-pressed={isPhoneMode}
+              >
+                Telefono
+              </button>
+            </div>
+
+            <form className="space-y-5" onSubmit={handleSubmit}>
+              <div className="login-stagger space-y-2">
+                <label htmlFor={isPhoneMode ? 'phone' : 'email'} className="block text-sm font-bold text-[#d8d0c8]">
+                  {isPhoneMode ? 'Numero de telefono' : 'Correo electronico'}
+                </label>
+                <div className="group relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#7f7770] transition-colors group-focus-within:text-[#ef4444]">
+                    {isPhoneMode ? <PhoneIcon /> : <MailIcon />}
+                  </span>
                   <input
+                    id={isPhoneMode ? 'phone' : 'email'}
                     required
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full bg-[#1A1A1A] border border-[#404040]/30 rounded-md py-3.5 pl-11 pr-4 text-[#F2F2F2] placeholder:text-[#8C8C8C]/30 focus:outline-none focus:border-[#EF4444]/60 focus:ring-1 focus:ring-[#EF4444]/30 transition-all font-body text-sm"
-                    placeholder="admin@chatcontrol.local"
+                    type={isPhoneMode ? 'tel' : 'email'}
+                    inputMode={isPhoneMode ? 'tel' : 'email'}
+                    autoComplete={isPhoneMode ? 'tel' : 'email'}
+                    value={isPhoneMode ? phone : email}
+                    onChange={(e) => (isPhoneMode ? setPhone(e.target.value) : setEmail(e.target.value))}
+                    className="login-gloss-field min-h-12 w-full rounded-lg border border-white/10 py-3 pl-12 pr-4 text-base text-white outline-none transition-colors placeholder:text-[#8c8c8c]/70 focus:border-[#ef4444]/70 focus:ring-2 focus:ring-[#ef4444]/20"
+                    placeholder={isPhoneMode ? '593999999999' : 'admin@empresa.com'}
                   />
                 </div>
               </div>
-            ) : (
-              <div className="space-y-2">
-                <label className="font-label text-[10px] uppercase tracking-widest text-[#8C8C8C] font-bold ml-1">Número de teléfono</label>
-                <div className="relative group">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-[#8C8C8C]/40 group-focus-within:text-[#EF4444] transition-colors">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-2.896-1.596-5.265-3.965-6.861-6.86l1.294-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
-                    </svg>
-                  </div>
-                  <input
-                    required
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full bg-[#1A1A1A] border border-[#404040]/30 rounded-md py-3.5 pl-11 pr-4 text-[#F2F2F2] placeholder:text-[#8C8C8C]/30 focus:outline-none focus:border-[#EF4444]/60 focus:ring-1 focus:ring-[#EF4444]/30 transition-all font-body text-sm"
-                    placeholder="Ej: 5491112345678"
-                  />
-                </div>
-              </div>
-            )}
 
-            <div className="space-y-2">
-              <div className="flex justify-between items-end px-1">
-                <label className="font-label text-[10px] uppercase tracking-widest text-[#8C8C8C] font-bold">Contraseña</label>
-              </div>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-[#8C8C8C]/40 group-focus-within:text-[#EF4444] transition-colors">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                  </svg>
-                </div>
-                <input
-                  required
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-[#1A1A1A] border border-[#404040]/30 rounded-md py-3.5 pl-11 pr-11 text-[#F2F2F2] placeholder:text-[#8C8C8C]/30 focus:outline-none focus:border-[#EF4444]/60 focus:ring-1 focus:ring-[#EF4444]/30 transition-all font-body text-sm"
-                  placeholder="••••••••••••"
-                />
-                <div className="absolute inset-y-0 right-0 pr-4 flex items-center">
+              <div className="login-stagger space-y-2">
+                <label htmlFor="password" className="block text-sm font-bold text-[#d8d0c8]">
+                  Contrasena
+                </label>
+                <div className="group relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#7f7770] transition-colors group-focus-within:text-[#ef4444]">
+                    <LockIcon />
+                  </span>
+                  <input
+                    id="password"
+                    required
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="login-gloss-field min-h-12 w-full rounded-lg border border-white/10 py-3 pl-12 pr-14 text-base text-white outline-none transition-colors placeholder:text-[#8c8c8c]/70 focus:border-[#ef4444]/70 focus:ring-2 focus:ring-[#ef4444]/20"
+                    placeholder="Tu clave de acceso"
+                  />
                   <button
                     type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="text-[#8C8C8C]/40 hover:text-[#F2F2F2] transition-colors focus:outline-none"
-                    aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                    onClick={() => setShowPassword((value) => !value)}
+                    className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-md text-[#9f968e] transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444]"
+                    aria-label={showPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
                   >
-                    {showPassword ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                      </svg>
-                    ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                    )}
+                    <EyeIcon hidden={showPassword} />
                   </button>
                 </div>
               </div>
-            </div>
 
-            {error && (
-              <div className="flex items-center text-[#EF4444] text-[11px] uppercase tracking-widest font-bold mt-2">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1.5 shrink-0">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className={`login-submit-btn relative w-full min-h-[52px] rounded-full text-white font-headline font-extrabold text-sm uppercase tracking-[0.24em] active:scale-[0.98] flex items-center justify-center overflow-hidden mt-6 sm:mt-8 transition-transform duration-200 ${loading ? 'opacity-80 cursor-wait' : 'hover:-translate-y-[1px]'}`}
-              style={{ backgroundImage: 'linear-gradient(135deg, #EF4444, #FB7185 45%, #F97316)' }}
-            >
-              {loading ? (
-                <span className="relative z-[1] py-3.5">ENTRANDO...</span>
-              ) : (
-                <span className="relative z-[1] inline-flex items-center gap-3 py-3.5">
-                  <span>ENTRAR</span>
-                  <span className="inline-flex items-center justify-center rounded-full bg-white/15 p-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-white">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-                    </svg>
-                  </span>
-                </span>
+              {error && (
+                <div className="login-stagger rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10 px-4 py-3 text-sm font-semibold text-[#ffb4ad]" role="alert">
+                  {error}
+                </div>
               )}
-            </button>
-          </form>
 
-          <div className="mt-8 pt-6 border-t border-[#404040]/30 min-h-[40px]">
-            <div className="grid gap-3 sm:grid-cols-[1fr_auto] items-center">
-              <div>
-                <p className="text-xs text-[#D4D4D8]/70">¿No estás seguro de qué credenciales usar? Contacta con el administrador de tu organización.</p>
-              </div>
               <button
-                type="button"
-                onClick={() => { setLegacyMode(!legacyMode); setError(''); }}
-                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#111111]/90 px-4 py-3 text-[#D4D4D8] hover:border-[#EF4444]/40 hover:text-white transition-all duration-200"
+                type="submit"
+                disabled={loading}
+                className="login-stagger login-gloss-button group flex min-h-12 w-full items-center justify-between rounded-lg px-4 py-3 text-base font-black text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffdad7] disabled:cursor-wait disabled:opacity-70"
               >
-                <span className="flex h-2.5 w-2.5 rounded-full bg-[#EF4444]" />
-                <span className="text-[10px] uppercase tracking-[0.25em] font-semibold">
-                  {legacyMode ? 'Acceso con correo' : 'Acceso con teléfono'}
+                <span>{loading ? 'Entrando...' : 'Entrar al panel'}</span>
+                <span className="flex h-9 w-9 items-center justify-center rounded-md bg-white/15 transition-transform group-hover:translate-x-0.5">
+                  <ArrowIcon />
                 </span>
               </button>
+            </form>
+
+            <div className="login-stagger mt-6 border-t border-white/10 pt-5">
+              <p className="text-sm leading-6 text-[#8c8c8c]">
+                Usa las credenciales creadas por el administrador de tu organizacion. El acceso legacy por telefono queda disponible para migraciones.
+              </p>
             </div>
           </div>
         </div>
-      </main>
-
-      {/* Side Decoration (Anchored to fixed viewport instead of card) */}
-      <div className="side-decor fixed right-6 sm:right-10 bottom-6 sm:bottom-10 opacity-60 pointer-events-none z-0">
-        <Image
-          src="/assets/images/krakedev_logo-ByJvfRFA.png"
-          alt="Krakedev Infrastructure"
-          width={120}
-          height={80}
-          className="w-[100px] sm:w-[130px] h-auto object-contain drop-shadow-[0_0_15px_rgba(239,68,68,0.5)] select-none pointer-events-none"
-          priority
-        />
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

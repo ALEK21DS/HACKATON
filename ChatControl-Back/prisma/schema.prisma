@@ -1,5 +1,3 @@
-// ChatControl — PostgreSQL + Prisma (multi-empresa)
-
 generator client {
   provider      = "prisma-client-js"
   binaryTargets = ["native", "debian-openssl-1.1.x"]
@@ -10,9 +8,165 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ---------------------------------------------------------------------------
-// Enums
-// ---------------------------------------------------------------------------
+model Organization {
+  id                    String                   @id @default(cuid())
+  name                  String
+  status                OrganizationStatus       @default(ACTIVE)
+  /// ID del número en Meta (metadata.phone_number_id). Índice para enrutar webhooks.
+  whatsappPhoneNumberId String?                  @unique
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @default(now()) @updatedAt
+  contacts              Contact[]
+  credentials           OrganizationCredentials?
+  orgSettings           OrganizationSetting[]
+  templates             Template[]
+  users                 User[]
+}
+
+/// Credenciales sensibles cifradas (AES-256-GCM). Solo el backend descifra.
+model OrganizationCredentials {
+  organizationId               String       @id
+  whatsappAccessTokenEnc       String?
+  whatsappBusinessAccountIdEnc String?
+  geminiApiKeyEnc              String?
+  updatedAt                    DateTime     @default(now()) @updatedAt
+  organization                 Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// Ajustes por empresa (modelo Gemini, tier, etc.)
+model OrganizationSetting {
+  id             String       @id @default(cuid())
+  organizationId String
+  key            String
+  value          String
+  updatedAt      DateTime     @default(now()) @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+}
+
+model User {
+  id                String             @id @default(cuid())
+  email             String             @unique
+  passwordHash      String
+  displayName       String?
+  role              UserRole
+  organizationId    String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @default(now()) @updatedAt
+  messagesSent      Message[]          @relation("MessageSentBy")
+  platformAuditLogs PlatformAuditLog[]
+  organization      Organization?      @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@index([email])
+}
+
+/// Acciones del super admin sobre la plataforma (crear/suspender empresa, etc.).
+model PlatformAuditLog {
+  id                   String   @id @default(cuid())
+  actorUserId          String
+  action               String
+  targetOrganizationId String?
+  metadata             Json?
+  createdAt            DateTime @default(now())
+  actor                User     @relation(fields: [actorUserId], references: [id])
+
+  @@index([actorUserId])
+  @@index([targetOrganizationId])
+  @@index([createdAt(sort: Desc)])
+}
+
+model Contact {
+  id                  String         @id @default(cuid())
+  phone               String
+  createdAt           DateTime       @default(now())
+  isSandboxAuthorized Boolean        @default(false)
+  name                String?
+  organizationId      String
+  organization        Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversations       Conversation[]
+
+  @@unique([organizationId, phone])
+  @@index([phone])
+}
+
+model Conversation {
+  id                String    @id @default(cuid())
+  contactId         String
+  lastUserMessageAt DateTime?
+  createdAt         DateTime  @default(now())
+  lastReadAt        DateTime?
+  contact           Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  messages          Message[]
+
+  @@index([contactId])
+  @@index([contactId, createdAt(sort: Desc)])
+}
+
+model Message {
+  id                String           @id @default(cuid())
+  conversationId    String
+  direction         MessageDirection
+  type              MessageType      @default(TEXT)
+  status            MessageStatus    @default(SENT)
+  body              String
+  whatsappMessageId String           @unique
+  whatsappTimestamp DateTime
+  fromAi            Boolean?         @default(false)
+  createdAt         DateTime         @default(now())
+  fileName          String?
+  mediaUrl          String?
+  mimeType          String?
+  sentByUserId      String?
+  conversation      Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sentByUser        User?            @relation("MessageSentBy", fields: [sentByUserId], references: [id])
+
+  @@index([conversationId])
+  @@index([conversationId, whatsappTimestamp])
+  @@index([whatsappMessageId])
+  @@index([sentByUserId])
+}
+
+model BroadcastLog {
+  id             String   @id @default(cuid())
+  conversationId String
+  type           String
+  status         String
+  errorMessage   String?
+  createdAt      DateTime @default(now())
+  organizationId String?
+  userId         String?
+
+  @@index([conversationId])
+  @@index([organizationId])
+  @@index([createdAt(sort: Desc)])
+}
+
+/// Configuración global legacy (tier, modelo por defecto). Preferir OrganizationSetting por tenant.
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+}
+
+model Template {
+  id             String       @id @default(cuid())
+  name           String
+  body           String
+  variables      String[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([name])
+}
 
 enum OrganizationStatus {
   ACTIVE
@@ -45,177 +199,4 @@ enum MessageStatus {
   DELIVERED
   READ
   FAILED
-}
-
-// ---------------------------------------------------------------------------
-// Multi-tenant core
-// ---------------------------------------------------------------------------
-
-model Organization {
-  id                   String             @id @default(cuid())
-  name                 String
-  status               OrganizationStatus @default(ACTIVE)
-  /// ID del número en Meta (metadata.phone_number_id). Índice para enrutar webhooks.
-  whatsappPhoneNumberId String?           @unique
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-
-  users         User[]
-  contacts      Contact[]
-  templates     Template[]
-  credentials   OrganizationCredentials?
-  orgSettings   OrganizationSetting[]
-}
-
-/// Credenciales sensibles cifradas (AES-256-GCM). Solo el backend descifra.
-model OrganizationCredentials {
-  organizationId           String       @id
-  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  whatsappAccessTokenEnc   String?
-  whatsappBusinessAccountIdEnc String?
-  geminiApiKeyEnc          String?
-  updatedAt                DateTime     @updatedAt
-}
-
-/// Ajustes por empresa (modelo Gemini, tier, etc.)
-model OrganizationSetting {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  key            String
-  value          String
-  updatedAt      DateTime     @updatedAt
-
-  @@unique([organizationId, key])
-  @@index([organizationId])
-}
-
-model User {
-  id             String       @id @default(cuid())
-  email          String       @unique
-  passwordHash   String
-  displayName    String?
-  role           UserRole
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-
-  messagesSent      Message[]         @relation("MessageSentBy")
-  platformAuditLogs PlatformAuditLog[]
-
-  @@index([organizationId])
-  @@index([email])
-}
-
-/// Acciones del super admin sobre la plataforma (crear/suspender empresa, etc.).
-model PlatformAuditLog {
-  id                     String   @id @default(cuid())
-  actorUserId            String
-  actor                  User     @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
-  action                 String
-  targetOrganizationId   String?
-  metadata               Json?
-  createdAt              DateTime @default(now())
-
-  @@index([actorUserId])
-  @@index([targetOrganizationId])
-  @@index([createdAt(sort: Desc)])
-}
-
-// ---------------------------------------------------------------------------
-// Chat / WhatsApp
-// ---------------------------------------------------------------------------
-
-model Contact {
-  id                  String   @id @default(cuid())
-  organizationId    String
-  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  phone               String
-  name                String?
-  isSandboxAuthorized Boolean  @default(false)
-  createdAt           DateTime @default(now())
-
-  conversations Conversation[]
-
-  @@unique([organizationId, phone])
-  @@index([organizationId])
-  @@index([phone])
-}
-
-model Conversation {
-  id                String    @id @default(cuid())
-  contactId         String
-  contact           Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  lastUserMessageAt DateTime?
-  lastReadAt        DateTime?
-  createdAt         DateTime  @default(now())
-
-  messages Message[]
-
-  @@index([contactId])
-  @@index([contactId, createdAt(sort: Desc)])
-}
-
-model Message {
-  id                String           @id @default(cuid())
-  conversationId    String
-  conversation      Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  direction         MessageDirection
-  type              MessageType      @default(TEXT)
-  status            MessageStatus    @default(SENT)
-  body              String
-  whatsappMessageId String           @unique
-  whatsappTimestamp DateTime
-  fromAi            Boolean?         @default(false)
-  mediaUrl          String?
-  mimeType          String?
-  fileName          String?
-  createdAt         DateTime         @default(now())
-  sentByUserId      String?
-  sentByUser        User?            @relation("MessageSentBy", fields: [sentByUserId], references: [id], onDelete: SetNull)
-
-  @@index([conversationId])
-  @@index([conversationId, whatsappTimestamp(sort: Asc)])
-  @@index([whatsappMessageId])
-  @@index([sentByUserId])
-}
-
-model BroadcastLog {
-  id               String   @id @default(cuid())
-  organizationId   String?
-  conversationId String
-  userId           String?
-  type             String
-  status           String
-  errorMessage     String?
-  createdAt        DateTime @default(now())
-
-  @@index([conversationId])
-  @@index([organizationId])
-  @@index([createdAt(sort: Desc)])
-}
-
-/// Configuración global legacy (tier, modelo por defecto). Preferir OrganizationSetting por tenant.
-model AppSetting {
-  id        String   @id @default(cuid())
-  key       String   @unique
-  value     String
-  updatedAt DateTime @updatedAt
-
-  @@index([key])
-}
-
-model Template {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  name           String
-  body           String
-  variables      String[]
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-
-  @@index([organizationId])
-  @@index([name])
 }
