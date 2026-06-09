@@ -12,6 +12,7 @@ import {
   type IntegrationStatus,
   type LeadDetectionConfig,
 } from '@/lib/api';
+import { Spinner } from '@/shared/ui/spinner';
 import styles from '../../chat/chat.module.css';
 
 function MetaIcon({ className }: { className?: string }) {
@@ -70,6 +71,8 @@ export default function IntegrationsPage() {
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
   
+  const [savingIntegrations, setSavingIntegrations] = useState(false);
+  const [savingLead, setSavingLead] = useState(false);
   const [showWaToken, setShowWaToken] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
 
@@ -99,6 +102,7 @@ export default function IntegrationsPage() {
     e.preventDefault();
     setErr('');
     setMsg('');
+    setSavingIntegrations(true);
     try {
       const next = await updateIntegrations({
         whatsappAccessToken: waToken || undefined,
@@ -112,18 +116,23 @@ export default function IntegrationsPage() {
       setMsg('Guardado correctamente. Los secretos no se vuelven a mostrar.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Error al guardar');
+    } finally {
+      setSavingIntegrations(false);
     }
   }
 
   async function handleSaveLeadDetection() {
     setErr('');
     setMsg('');
+    setSavingLead(true);
     try {
       const next = await updateLeadDetectionConfig(leadConfig);
       setLeadConfig(next);
       setMsg('Configuración de detección de leads guardada correctamente.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Error al guardar detección de leads');
+    } finally {
+      setSavingLead(false);
     }
   }
 
@@ -265,24 +274,30 @@ export default function IntegrationsPage() {
 
             <button 
               type="submit" 
+              disabled={savingIntegrations}
               style={{ 
                 padding: '1rem',
-                background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)',
+                background: savingIntegrations ? '#1A1A1A' : 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)',
                 border: 'none',
                 borderRadius: 12,
-                color: 'white',
+                color: savingIntegrations ? '#666' : 'white',
                 fontSize: '0.9rem',
                 fontWeight: 800,
                 textTransform: 'uppercase',
                 letterSpacing: '0.1em',
-                cursor: 'pointer',
-                boxShadow: '0 4px 15px rgba(239, 68, 68, 0.3)',
+                cursor: savingIntegrations ? 'wait' : 'pointer',
+                boxShadow: savingIntegrations ? 'none' : '0 4px 15px rgba(239, 68, 68, 0.3)',
                 transition: 'all 0.2s ease',
                 alignSelf: 'flex-start',
-                minWidth: '220px'
+                minWidth: '220px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
               }}
             >
-              Guardar Integraciones
+              {savingIntegrations && <Spinner />}
+              {savingIntegrations ? 'Guardando...' : 'Guardar Integraciones'}
             </button>
           </form>
 
@@ -412,27 +427,34 @@ export default function IntegrationsPage() {
 
             <button 
               onClick={handleSaveLeadDetection}
-              disabled={!leadConfig.enabled || !leadConfig.autoMessage.trim()}
+              disabled={savingLead || !leadConfig.enabled || !leadConfig.autoMessage.trim()}
               style={{ 
                 marginTop: '0.5rem',
                 padding: '0.85rem 2rem',
-                background: leadConfig.enabled && leadConfig.autoMessage.trim() 
-                  ? 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)' 
-                  : '#1A1A1A',
+                background: savingLead 
+                  ? '#1A1A1A'
+                  : leadConfig.enabled && leadConfig.autoMessage.trim() 
+                    ? 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)' 
+                    : '#1A1A1A',
                 border: 'none',
                 borderRadius: 12,
-                color: leadConfig.enabled && leadConfig.autoMessage.trim() ? 'white' : '#444',
+                color: savingLead ? '#666' : leadConfig.enabled && leadConfig.autoMessage.trim() ? 'white' : '#444',
                 fontSize: '0.85rem',
                 fontWeight: 800,
                 textTransform: 'uppercase',
                 letterSpacing: '0.1em',
-                cursor: leadConfig.enabled && leadConfig.autoMessage.trim() ? 'pointer' : 'not-allowed',
-                boxShadow: leadConfig.enabled && leadConfig.autoMessage.trim() ? '0 4px 15px rgba(239, 68, 68, 0.3)' : 'none',
+                cursor: savingLead ? 'wait' : leadConfig.enabled && leadConfig.autoMessage.trim() ? 'pointer' : 'not-allowed',
+                boxShadow: savingLead ? 'none' : leadConfig.enabled && leadConfig.autoMessage.trim() ? '0 4px 15px rgba(239, 68, 68, 0.3)' : 'none',
                 transition: 'all 0.2s ease',
                 alignSelf: 'flex-start',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
               }}
             >
-              Guardar Configuración
+              {savingLead && <Spinner />}
+              {savingLead ? 'Guardando...' : 'Guardar Configuración'}
             </button>
           </div>
         </>

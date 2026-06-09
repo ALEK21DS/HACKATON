@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Spinner } from '@/shared/ui/spinner';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -78,6 +79,7 @@ export default function IntegrationsPage() {
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingLead, setSavingLead] = useState(false);
+  const [savingIntegrations, setSavingIntegrations] = useState(false);
 
   const [showWaToken, setShowWaToken] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
@@ -106,6 +108,7 @@ export default function IntegrationsPage() {
 
   async function handleSaveIntegrations(e: React.FormEvent) {
     e.preventDefault();
+    setSavingIntegrations(true);
     setErr('');
     setMsg('');
     try {
@@ -121,6 +124,8 @@ export default function IntegrationsPage() {
       setMsg('Integraciones guardadas correctamente.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Error al guardar');
+    } finally {
+      setSavingIntegrations(false);
     }
   }
 
@@ -470,24 +475,29 @@ export default function IntegrationsPage() {
 
         <button
           type="submit"
+          disabled={savingIntegrations}
           style={{
             padding: '1rem',
-            background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)',
+            background: savingIntegrations ? '#1A1A1A' : 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)',
             border: 'none',
             borderRadius: 12,
-            color: 'white',
+            color: savingIntegrations ? '#444' : 'white',
             fontSize: '0.9rem',
             fontWeight: 800,
             textTransform: 'uppercase',
             letterSpacing: '0.1em',
-            cursor: 'pointer',
-            boxShadow: '0 4px 15px rgba(239, 68, 68, 0.3)',
+            cursor: savingIntegrations ? 'not-allowed' : 'pointer',
+            boxShadow: savingIntegrations ? 'none' : '0 4px 15px rgba(239, 68, 68, 0.3)',
             transition: 'all 0.2s ease',
             alignSelf: 'flex-start',
             minWidth: '220px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
           }}
         >
-          Guardar Integraciones
+          {savingIntegrations ? <><Spinner /> Guardando...</> : 'Guardar Integraciones'}
         </button>
       </form>
 

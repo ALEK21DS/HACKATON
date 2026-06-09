@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Spinner } from '@/shared/ui/spinner';
 import { useRouter } from 'next/navigation';
 import {
   isLoggedIn,
@@ -110,6 +111,9 @@ export default function OrgUsersPage() {
 
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const [savingCreate, setSavingCreate] = useState(false);
+  const [savingUpdate, setSavingUpdate] = useState(false);
+  const [savingReset, setSavingReset] = useState(false);
 
   async function refresh() {
     try {
@@ -134,9 +138,11 @@ export default function OrgUsersPage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setErr(''); setMsg('');
+    setSavingCreate(true);
 
     if (password !== confirmPassword) {
       setErr('Las contraseñas no coinciden');
+      setSavingCreate(false);
       return;
     }
 
@@ -147,30 +153,35 @@ export default function OrgUsersPage() {
       await refresh();
       setTimeout(() => { setShowCreateModal(false); setMsg(''); }, 1500);
     } catch (e) { setErr(e instanceof Error ? e.message : 'Error al crear'); }
+    finally { setSavingCreate(false); }
   }
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedUser) return;
     setErr(''); setMsg('');
+    setSavingUpdate(true);
     try {
       await updateOrgUser(selectedUser.id, { displayName: editName.trim(), role: editRole });
       setMsg('Cambios guardados.');
       await refresh();
       setTimeout(() => { setMsg(''); }, 2000);
     } catch (e) { setErr(e instanceof Error ? e.message : 'Error al actualizar'); }
+    finally { setSavingUpdate(false); }
   }
 
   async function handleResetPassword(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedUser || !newPass) return;
     setErr(''); setMsg('');
+    setSavingReset(true);
     try {
       await resetOrgUserPassword(selectedUser.id, newPass);
       setNewPass('');
       setMsg('Contraseña actualizada con éxito.');
       setTimeout(() => { setMsg(''); }, 2000);
     } catch (e) { setErr(e instanceof Error ? e.message : 'Error al cambiar contraseña'); }
+    finally { setSavingReset(false); }
   }
 
   const handleNew = () => {
@@ -396,7 +407,7 @@ export default function OrgUsersPage() {
               {err && <div style={{ color: '#EF4444', fontSize: '0.8rem', textAlign: 'center', fontWeight: 700 }}>{err}</div>}
               {msg && <div style={{ color: '#4ADE80', fontSize: '0.8rem', textAlign: 'center', fontWeight: 700 }}>{msg}</div>}
               
-              <button type="submit" style={{ marginTop: '1rem', padding: '1.25rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: 16, color: 'white', fontWeight: 900, textTransform: 'uppercase', fontSize: '0.85rem', cursor: 'pointer', boxShadow: '0 10px 30px rgba(239, 68, 68, 0.4)' }}>Crear Usuario</button>
+              <button type="submit" disabled={savingCreate} style={{ marginTop: '1rem', padding: '1.25rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: 16, color: 'white', fontWeight: 900, textTransform: 'uppercase', fontSize: '0.85rem', cursor: 'pointer', boxShadow: '0 10px 30px rgba(239, 68, 68, 0.4)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: savingCreate ? 0.7 : 1 }}>{savingCreate ? <><Spinner /> Guardando...</> : 'Crear Usuario'}</button>
             </form>
           </div>
         </div>
@@ -437,7 +448,7 @@ export default function OrgUsersPage() {
                   </select>
                 </div>
               </div>
-              <button type="submit" style={{ width: '100%', padding: '1rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, color: 'white', fontSize: '0.85rem', fontWeight: 900, textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s' }}>Actualizar Perfil</button>
+              <button type="submit" disabled={savingUpdate} style={{ width: '100%', padding: '1rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, color: 'white', fontSize: '0.85rem', fontWeight: 900, textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: savingUpdate ? 0.7 : 1 }}>{savingUpdate ? <><Spinner /> Guardando...</> : 'Actualizar Perfil'}</button>
             </form>
 
             <div style={{ background: 'rgba(239, 68, 68, 0.02)', border: '1px solid rgba(239, 68, 68, 0.1)', borderRadius: '20px', padding: '1.5rem' }}>
@@ -448,7 +459,7 @@ export default function OrgUsersPage() {
                   value={newPass} onChange={(e) => setNewPass(e.target.value.replace(/\s/g, ''))} 
                   style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, padding: '0.85rem', color: 'white', outline: 'none' }} 
                 />
-                <button type="submit" style={{ padding: '0 1.5rem', background: '#EF4444', border: 'none', borderRadius: 12, color: 'white', fontWeight: 900, fontSize: '0.8rem', cursor: 'pointer', textTransform: 'uppercase' }}>Resetear</button>
+                <button type="submit" disabled={savingReset} style={{ padding: '0 1.5rem', background: '#EF4444', border: 'none', borderRadius: 12, color: 'white', fontWeight: 900, fontSize: '0.8rem', cursor: 'pointer', textTransform: 'uppercase', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: savingReset ? 0.7 : 1 }}>{savingReset ? <><Spinner /> Guardando...</> : 'Resetear'}</button>
               </form>
             </div>
 

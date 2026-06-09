@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Spinner } from '@/shared/ui/spinner';
 import { useRouter } from 'next/navigation';
 import {
   isLoggedIn,
@@ -268,6 +269,10 @@ export default function SettingsPage() {
             style={{ 
               marginTop: '1rem',
               padding: '1rem',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
               background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)',
               border: 'none',
               borderRadius: 12,
@@ -282,7 +287,7 @@ export default function SettingsPage() {
               transition: 'all 0.2s ease'
             }}
           >
-            {saving ? 'Guardando Cambios...' : myRole === 'AGENT' ? 'Vista de Solo Lectura' : 'Guardar Configuración'}
+            {saving ? <><Spinner /> Guardando Cambios...</> : myRole === 'AGENT' ? 'Vista de Solo Lectura' : 'Guardar Configuración'}
           </button>
         </form>
       )}

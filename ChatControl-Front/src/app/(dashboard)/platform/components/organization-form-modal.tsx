@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { AppModal } from '@/components/ui/modal';
 import type { FormEvent } from 'react';
+import { Spinner } from '@/shared/ui/spinner';
 
 type OrganizationFormModalProps = {
   isOpen: boolean;
@@ -50,6 +51,7 @@ export function OrganizationFormModal({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [savingCreate, setSavingCreate] = useState(false);
 
   const inputCls = "w-full bg-[#1A1A1A] border border-[#404040]/30 rounded-md py-3 px-4 text-[#F2F2F2] placeholder:text-[#8C8C8C]/30 focus:outline-none focus:border-[#EF4444]/60 focus:ring-1 focus:ring-[#EF4444]/30 transition-all font-body text-sm";
 
@@ -65,7 +67,7 @@ export function OrganizationFormModal({
     return '';
   }
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const errors: Record<string, string> = {};
     if (includeAdminOnCreate) {
@@ -77,7 +79,12 @@ export function OrganizationFormModal({
     }
     setFormErrors(errors);
     if (Object.keys(errors).length === 0) {
-      onSubmit(e);
+      setSavingCreate(true);
+      try {
+        await onSubmit(e);
+      } finally {
+        setSavingCreate(false);
+      }
     }
   }
 
@@ -233,9 +240,10 @@ export function OrganizationFormModal({
           </button>
           <button
             type="submit"
-            className="relative min-h-[44px] px-6 rounded-md bg-[#1A1A1A] hover:bg-[#EF4444] text-[#8C8C8C] hover:text-white font-headline font-extrabold text-xs uppercase tracking-[0.2em] active:scale-[0.98] transition-all"
+            disabled={savingCreate}
+            className="relative min-h-[44px] px-6 rounded-md bg-[#1A1A1A] hover:bg-[#EF4444] text-[#8C8C8C] hover:text-white font-headline font-extrabold text-xs uppercase tracking-[0.2em] active:scale-[0.98] transition-all disabled:opacity-50 inline-flex items-center gap-2"
           >
-            Crear empresa
+            {savingCreate ? <><Spinner /> Guardando...</> : 'Crear empresa'}
           </button>
         </div>
       </form>

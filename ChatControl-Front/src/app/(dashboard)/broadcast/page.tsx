@@ -16,6 +16,7 @@ import {
   type BroadcastMessageType,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
+import { Spinner } from '@/shared/ui/spinner';
 
 const WS_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -328,7 +329,7 @@ export default function BroadcastPage() {
                       disabled={generating}
                       style={{ padding: '0 1.5rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '14px', color: '#EF4444', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                     >
-                      <SparklesIcon />
+                      {generating ? <Spinner size={16} /> : <SparklesIcon />}
                       {generating ? '...' : 'GENERAR'}
                     </button>
                   </div>
@@ -355,9 +356,11 @@ export default function BroadcastPage() {
               disabled={sending || selectedIds.size === 0}
               style={{ 
                 padding: '1.25rem 3rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '16px', color: 'white', fontWeight: 900, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.15em', cursor: 'pointer', transition: 'all 0.3s ease',
-                boxShadow: '0 10px 30px rgba(239, 68, 68, 0.4)', opacity: (sending || selectedIds.size === 0) ? 0.5 : 1
+                boxShadow: '0 10px 30px rgba(239, 68, 68, 0.4)', opacity: (sending || selectedIds.size === 0) ? 0.5 : 1,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'
               }}
             >
+              {sending ? <Spinner size={16} /> : null}
               {sending ? 'Lanzando...' : 'Lanzar Masivos'}
             </button>
           </div>

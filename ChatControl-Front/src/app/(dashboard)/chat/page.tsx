@@ -18,6 +18,7 @@ import {
   type NewMessagePayload,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
+import { Spinner } from '@/shared/ui/spinner';
 import styles from './chat.module.css';
 
 const WS_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -388,10 +389,10 @@ export default function ChatPage() {
                   <button 
                     onClick={handleGenerateReply}
                     disabled={generating || !canSend}
-                    style={{ padding: '0.75rem', borderRadius: '14px', background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', border: 'none', cursor: 'pointer', transition: 'all 0.2s' }}
+                    style={{ padding: '0.75rem', borderRadius: '14px', background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', border: 'none', cursor: 'pointer', transition: 'all 0.2s', gap: '0.5rem' }}
                     title="Asistente IA"
                   >
-                    <SparklesIcon />
+                    {generating ? <Spinner /> : <SparklesIcon />}
                   </button>
                   <button 
                     onClick={handleSend}
@@ -408,10 +409,11 @@ export default function ChatPage() {
                       alignItems: 'center',
                       justifyContent: 'center',
                       transition: 'all 0.2s',
-                      boxShadow: canSend && replyInput.trim() ? '0 8px 20px rgba(239, 68, 68, 0.3)' : 'none'
+                      boxShadow: canSend && replyInput.trim() ? '0 8px 20px rgba(239, 68, 68, 0.3)' : 'none',
+                      gap: '0.5rem'
                     }}
                   >
-                    <SendIcon />
+                    {sending ? <Spinner /> : <SendIcon />}
                   </button>
                 </div>
               </div>

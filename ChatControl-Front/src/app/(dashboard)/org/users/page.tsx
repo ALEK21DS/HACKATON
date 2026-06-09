@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Spinner } from '@/shared/ui/spinner';
 import {
   isLoggedIn,
   getMe,
@@ -25,6 +26,7 @@ export default function OrgUsersPage() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
+  const [savingCreate, setSavingCreate] = useState(false);
 
   async function refresh() {
     setUsers(await getOrgUsers());
@@ -56,6 +58,7 @@ export default function OrgUsersPage() {
     e.preventDefault();
     setErr('');
     setMsg('');
+    setSavingCreate(true);
     try {
       await createOrgUser({ email, password, displayName: displayName || undefined, role });
       setEmail('');
@@ -66,6 +69,8 @@ export default function OrgUsersPage() {
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Error');
+    } finally {
+      setSavingCreate(false);
     }
   }
 
@@ -110,7 +115,9 @@ export default function OrgUsersPage() {
         </select>
         {err && <p style={{ color: 'crimson' }}>{err}</p>}
         {msg && <p style={{ color: 'green' }}>{msg}</p>}
-        <button type="submit">Crear</button>
+        <button type="submit" disabled={savingCreate} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+          {savingCreate ? <><Spinner /> Guardando…</> : 'Crear'}
+        </button>
       </form>
 
       <h2 style={{ fontSize: '1.05rem' }}>Lista</h2>

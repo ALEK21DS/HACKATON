@@ -219,7 +219,10 @@ export class ChatService {
     const where: any = { contact: { organizationId } };
 
     if (userRole === 'AGENT' && userId) {
-      where.assignedToUserId = userId;
+      where.OR = [
+        { assignedToUserId: userId },
+        { assignedToUserId: null },
+      ];
     }
 
     const list = await this.prisma.conversation.findMany({
@@ -402,7 +405,7 @@ export class ChatService {
     });
     if (!c) return undefined;
 
-    if (userRole === 'AGENT' && userId && c.assignedToUserId !== userId) {
+    if (userRole === 'AGENT' && userId && c.assignedToUserId && c.assignedToUserId !== userId) {
       return undefined;
     }
 
@@ -555,7 +558,7 @@ export class ChatService {
     });
     if (!conv) throw new NotFoundException('Conversación no encontrada');
 
-    if (userRole === 'AGENT' && userId && conv.assignedToUserId !== userId) {
+    if (userRole === 'AGENT' && userId && conv.assignedToUserId && conv.assignedToUserId !== userId) {
       throw new ForbiddenException('No tienes acceso a esta conversación');
     }
   }

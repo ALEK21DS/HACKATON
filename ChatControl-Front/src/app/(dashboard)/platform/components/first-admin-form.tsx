@@ -1,5 +1,9 @@
+'use client';
+
+import { useState } from 'react';
 import { AppButton } from '@/components/ui/button';
 import { AppInput } from '@/components/ui/input';
+import { Spinner } from '@/shared/ui/spinner';
 
 export type FirstAdminDraft = { email: string; password: string; displayName: string };
 
@@ -10,6 +14,17 @@ type FirstAdminFormProps = {
 };
 
 export function FirstAdminForm({ draft, onChange, onSubmit }: FirstAdminFormProps) {
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await onSubmit();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="flex flex-col sm:flex-row flex-wrap gap-4 items-end">
       <div className="flex-1 min-w-[200px]">
@@ -45,10 +60,11 @@ export function FirstAdminForm({ draft, onChange, onSubmit }: FirstAdminFormProp
       </div>
       <button 
         type="button" 
-        onClick={onSubmit}
-        className="w-full sm:w-auto relative min-h-[44px] px-6 rounded-md bg-[#EF4444] hover:bg-[#EF4444]/80 text-white font-headline font-extrabold text-xs uppercase tracking-[0.2em] active:scale-[0.98] transition-all"
+        onClick={handleSave}
+        disabled={saving}
+        className="w-full sm:w-auto relative min-h-[44px] px-6 rounded-md bg-[#EF4444] hover:bg-[#EF4444]/80 text-white font-headline font-extrabold text-xs uppercase tracking-[0.2em] active:scale-[0.98] transition-all disabled:opacity-50 inline-flex items-center gap-2"
       >
-        Guardar
+        {saving ? <><Spinner /> Guardando...</> : 'Guardar'}
       </button>
     </div>
   );

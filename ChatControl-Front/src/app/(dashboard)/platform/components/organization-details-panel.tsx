@@ -5,6 +5,7 @@ import type { PlatformOrganization } from '@/lib/api';
 import { renamePlatformOrganization, resetPlatformAdminPassword } from '@/lib/api';
 import { AppModal } from '@/components/ui/modal';
 import { FirstAdminForm, type FirstAdminDraft } from './first-admin-form';
+import { Spinner } from '@/shared/ui/spinner';
 
 type OrganizationDetailsPanelProps = {
   isOpen: boolean;
@@ -27,6 +28,7 @@ export function OrganizationDetailsPanel({
   onToggleStatus,
   onRenamed,
 }: OrganizationDetailsPanelProps) {
+  const [savingStatus, setSavingStatus] = useState(false);
   const [activeTab, setActiveTab] = useState<'info' | 'edit' | 'password'>('info');
 
   // Edit name state
@@ -146,14 +148,15 @@ export function OrganizationDetailsPanel({
           <div className="pt-4 border-t border-[#404040]/30">
             <button
               type="button"
-              onClick={onToggleStatus}
-              className={`w-full sm:w-auto min-h-[44px] px-6 rounded-md font-headline font-extrabold text-xs uppercase tracking-[0.2em] active:scale-[0.98] transition-all ${
+              onClick={() => { setSavingStatus(true); try { onToggleStatus(); } finally { setSavingStatus(false); } }}
+              disabled={savingStatus}
+              className={`w-full sm:w-auto min-h-[44px] px-6 rounded-md font-headline font-extrabold text-xs uppercase tracking-[0.2em] active:scale-[0.98] transition-all disabled:opacity-50 inline-flex items-center gap-2 ${
                 organization.status === 'ACTIVE'
                   ? 'border border-[#EF4444] text-[#EF4444] hover:bg-[#EF4444]/10'
                   : 'bg-green-600 hover:bg-green-500 text-white shadow-[0_0_20px_rgba(34,197,94,0.3)]'
               }`}
             >
-              {organization.status === 'ACTIVE' ? 'Suspender empresa' : 'Activar empresa'}
+              {savingStatus ? <><Spinner /> {organization.status === 'ACTIVE' ? 'Suspender empresa' : 'Activar empresa'}</> : organization.status === 'ACTIVE' ? 'Suspender empresa' : 'Activar empresa'}
             </button>
           </div>
           <div className="bg-[#1A1A1A] rounded-lg p-4 border border-[#404040]/30">
@@ -194,9 +197,9 @@ export function OrganizationDetailsPanel({
             <button
               type="submit"
               disabled={editNameLoading}
-              className="min-h-[44px] px-6 rounded-md bg-[#1A1A1A] hover:bg-[#EF4444] text-[#8C8C8C] hover:text-white font-headline font-extrabold text-xs uppercase tracking-[0.2em] transition-all active:scale-[0.98] disabled:opacity-50"
+              className="min-h-[44px] px-6 rounded-md bg-[#1A1A1A] hover:bg-[#EF4444] text-[#8C8C8C] hover:text-white font-headline font-extrabold text-xs uppercase tracking-[0.2em] transition-all active:scale-[0.98] disabled:opacity-50 inline-flex items-center gap-2"
             >
-              {editNameLoading ? 'Guardando...' : 'Guardar nombre'}
+              {editNameLoading ? <><Spinner /> Guardando...</> : 'Guardar nombre'}
             </button>
           </div>
         </form>
@@ -261,9 +264,9 @@ export function OrganizationDetailsPanel({
             <button
               type="submit"
               disabled={pwdLoading}
-              className="min-h-[44px] px-6 rounded-md bg-[#1A1A1A] hover:bg-[#EF4444] text-[#8C8C8C] hover:text-white font-headline font-extrabold text-xs uppercase tracking-[0.2em] transition-all active:scale-[0.98] disabled:opacity-50"
+              className="min-h-[44px] px-6 rounded-md bg-[#1A1A1A] hover:bg-[#EF4444] text-[#8C8C8C] hover:text-white font-headline font-extrabold text-xs uppercase tracking-[0.2em] transition-all active:scale-[0.98] disabled:opacity-50 inline-flex items-center gap-2"
             >
-              {pwdLoading ? 'Cambiando...' : 'Cambiar contraseña'}
+              {pwdLoading ? <><Spinner /> Cambiando...</> : 'Cambiar contraseña'}
             </button>
           </div>
         </form>

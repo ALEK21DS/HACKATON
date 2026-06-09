@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Spinner } from '@/shared/ui/spinner';
 import { useRouter } from 'next/navigation';
 import {
   isLoggedIn,
@@ -241,8 +242,8 @@ export default function AssignmentPage() {
             )}
           </div>
 
-          <button onClick={handleSave} disabled={saving || assignedAgents.length === 0} style={{ padding: '1.25rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '16px', color: 'white', fontWeight: 900, cursor: 'pointer', boxShadow: '0 10px 30px rgba(239, 68, 68, 0.3)', opacity: assignedAgents.length === 0 ? 0.5 : 1 }}>
-            {saving ? 'GUARDANDO...' : 'GUARDAR CONFIGURACIÓN'}
+          <button onClick={handleSave} disabled={saving || assignedAgents.length === 0} style={{ padding: '1.25rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '16px', color: 'white', fontWeight: 900, cursor: 'pointer', boxShadow: '0 10px 30px rgba(239, 68, 68, 0.3)', opacity: assignedAgents.length === 0 ? 0.5 : 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+            {saving ? <><Spinner /> GUARDANDO...</> : 'GUARDAR CONFIGURACIÓN'}
           </button>
         </div>
       )}

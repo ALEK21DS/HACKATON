@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Spinner } from '@/shared/ui/spinner';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import {
@@ -267,9 +268,9 @@ export default function ContactsPage() {
             <button 
               type="submit" 
               disabled={saving || !phone.trim()}
-              style={{ width: '100%', padding: '1.25rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '14px', color: 'white', fontWeight: 900, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.15em', cursor: 'pointer', transition: 'all 0.3s ease', boxShadow: '0 10px 30px rgba(239, 68, 68, 0.3)', marginTop: '1rem', opacity: (saving || !phone.trim()) ? 0.5 : 1 }}
+              style={{ width: '100%', padding: '1.25rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '14px', color: 'white', fontWeight: 900, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.15em', cursor: 'pointer', transition: 'all 0.3s ease', boxShadow: '0 10px 30px rgba(239, 68, 68, 0.3)', marginTop: '1rem', opacity: (saving || !phone.trim()) ? 0.5 : 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
             >
-              {saving ? 'Guardando...' : selectedId ? 'Actualizar Identidad' : 'Registrar Contacto'}
+              {saving ? <><Spinner /> Guardando...</> : selectedId ? 'Actualizar Identidad' : 'Registrar Contacto'}
             </button>
           </form>
         </div>
