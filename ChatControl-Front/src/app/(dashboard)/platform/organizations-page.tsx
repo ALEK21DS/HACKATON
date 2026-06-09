@@ -349,7 +349,7 @@ export function OrganizationsPage() {
               </div>
             ) : (
               <>
-                <div className="bg-white/[0.02] border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
+                <div className="bg-white/[0.02] border border-white/10 rounded-2xl shadow-2xl" style={{ overflowX: 'auto' }}>
                   <table className="w-full border-collapse text-left">
                     <thead>
                       <tr className="border-b border-white/10 bg-white/[0.01]">

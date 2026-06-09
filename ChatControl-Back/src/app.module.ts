@@ -14,6 +14,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { PlatformModule } from './platform/platform.module';
 import { OrgUsersModule } from './org-users/org-users.module';
 import { OrgAuditModule } from './org-audit/org-audit.module';
+import { LeadAssignmentModule } from './lead-assignment/lead-assignment.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { OrgAuditModule } from './org-audit/org-audit.module';
     PlatformModule,
     OrgUsersModule,
     OrgAuditModule,
+    LeadAssignmentModule,
   ],
 })
 export class AppModule {}

@@ -18,6 +18,7 @@ import {
   type NewMessagePayload,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
+import styles from './chat.module.css';
 
 const WS_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -77,6 +78,7 @@ export default function ChatPage() {
   const [generating, setGenerating] = useState(false);
   const [typingHint, setTypingHint] = useState('');
   const [canSend, setCanSend] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   
   const socketRef = useRef<Socket | null>(null);
   const selectedIdRef = useRef<string | null>(null);
@@ -109,6 +111,13 @@ export default function ChatPage() {
           return [...prev, payload.message];
         });
         markConversationAsRead(payload.conversationId);
+      }
+    });
+
+    socket.on('conversation_assigned_to_me', (p: { conversationId: string }) => {
+      loadConversations(false);
+      if (selectedIdRef.current === p.conversationId) {
+        markConversationAsRead(p.conversationId);
       }
     });
 
@@ -198,8 +207,11 @@ export default function ChatPage() {
   return (
     <div style={{ display: 'flex', width: '100%', height: '100vh', background: '#040404', color: '#F2F2F2', overflow: 'hidden' }}>
       
+      {/* Mobile sidebar backdrop */}
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+
       {/* ── Sidebar: Lista de Chats ── */}
-      <aside style={{ width: '380px', borderRight: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', background: '#080808' }}>
+      <aside className={`${styles.sidebar}${sidebarOpen ? ` ${styles.sidebarVisible}` : ''}`}>
         <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
             <h2 style={{ fontSize: '1.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em' }}>Mensajes</h2>
@@ -280,6 +292,15 @@ export default function ChatPage() {
             {/* Header del Chat */}
             <header style={{ height: '80px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', padding: '0 2rem', justifyContent: 'space-between', background: 'rgba(4,4,4,0.8)', backdropFilter: 'blur(10px)', zIndex: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <button 
+                  onClick={() => setSidebarOpen(true)} 
+                  className="mobile-sidebar-toggle"
+                  aria-label="Abrir lista de conversaciones"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+                  </svg>
+                </button>
                 <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <PersonIcon />
                 </div>
@@ -429,6 +450,27 @@ export default function ChatPage() {
         .typing-dot {
           width: 4px; height: 4px; border-radius: 50%; background: #EF4444;
           animation: typing 1.4s infinite both;
+        }
+
+        .mobile-sidebar-toggle {
+          display: none;
+          width: 40px;
+          height: 40px;
+          border-radius: 10px;
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.05);
+          color: #8C8C8C;
+          cursor: pointer;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .mobile-sidebar-toggle:hover {
+          background: rgba(255,255,255,0.08);
+          color: #F2F2F2;
+        }
+        @media (max-width: 768px) {
+          .mobile-sidebar-toggle { display: flex; }
         }
       `}</style>
     </div>

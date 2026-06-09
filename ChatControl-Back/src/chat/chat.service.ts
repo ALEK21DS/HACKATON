@@ -7,6 +7,8 @@ import { Window24hService } from '../common/window-24h.service';
 import { AiService } from '../ai/ai.service';
 import { SettingsService } from '../settings/settings.service';
 import { ChatGateway } from './chat.gateway';
+import { LeadAssignmentService } from '../lead-assignment/lead-assignment.service';
+import { IntegrationsService } from '../integrations/integrations.service';
 
 export interface Message {
   id: string;
@@ -30,10 +32,22 @@ export interface Conversation {
   lastMessagePreview: string;
   lastMessageAt: number;
   unreadCount: number;
+  assignedToUserId?: string | null;
+  isNewLead?: boolean;
 }
 
 function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, '');
+}
+
+function normalizeMessageText(text: string): string {
+  return text
+    .replace(/\s+/g, ' ')
+    .replace(/\n+/g, ' ')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[^\w\s\u00C0-\u024F]/g, '')
+    .trim()
+    .toLowerCase();
 }
 
 @Injectable()
@@ -46,6 +60,8 @@ export class ChatService {
     private readonly settings: SettingsService,
     private readonly chatGateway: ChatGateway,
     private readonly config: ConfigService,
+    private readonly leadAssignment: LeadAssignmentService,
+    private readonly integrations: IntegrationsService,
   ) {}
 
   async registerIncomingMessage(payload: {
@@ -79,6 +95,8 @@ export class ChatService {
       where: { contactId: contact.id },
       orderBy: { createdAt: 'desc' },
     });
+    const isNewConversation = !conversation;
+
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
         data: {
@@ -92,6 +110,7 @@ export class ChatService {
         data: { lastUserMessageAt: new Date(payload.timestamp) },
       });
     }
+
     await this.prisma.message.upsert({
       where: { whatsappMessageId: payload.messageId },
       create: {
@@ -108,6 +127,11 @@ export class ChatService {
       },
       update: {},
     });
+
+    if (isNewConversation && payload.type === MessageType.TEXT) {
+      await this.tryAutoDetectAndAssign(conversation.id, payload.organizationId, payload.text);
+    }
+
     this.chatGateway.emitNewMessage(
       payload.organizationId,
       conversation.id,
@@ -123,6 +147,62 @@ export class ChatService {
     );
   }
 
+  private async tryAutoDetectAndAssign(
+    conversationId: string,
+    organizationId: string,
+    messageText: string,
+  ): Promise<void> {
+    try {
+      const config = await this.integrations.getLeadDetectionConfig(organizationId);
+      if (!config.enabled || !config.autoMessage) return;
+
+      const normalizedReceived = normalizeMessageText(messageText);
+      const normalizedConfigured = normalizeMessageText(config.autoMessage);
+
+      if (normalizedReceived.length < 10 || normalizedConfigured.length < 10) return;
+
+      const similarity = this.computeSimilarity(normalizedReceived, normalizedConfigured);
+      if (similarity < 0.75) return;
+
+      await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: {
+          autoMessageDetectedAt: new Date(),
+          isNewLead: true,
+        },
+      });
+
+      await this.leadAssignment.assignNewLead(conversationId, organizationId);
+    } catch (error) {
+      // Silently fail - lead detection should never break message reception
+    }
+  }
+
+  private computeSimilarity(a: string, b: string): number {
+    const longer = a.length > b.length ? a : b;
+    const shorter = a.length > b.length ? b : a;
+    if (longer.length === 0) return 1.0;
+    const editDist = this.levenshteinDistance(longer, shorter);
+    return 1.0 - editDist / longer.length;
+  }
+
+  private levenshteinDistance(a: string, b: string): number {
+    const matrix: number[][] = [];
+    for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+    for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+    for (let i = 1; i <= b.length; i++) {
+      for (let j = 1; j <= a.length; j++) {
+        const cost = a[j - 1] === b[i - 1] ? 0 : 1;
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j - 1] + cost,
+        );
+      }
+    }
+    return matrix[b.length][a.length];
+  }
+
   private async assertConversationInOrg(conversationId: string, organizationId: string): Promise<void> {
     const c = await this.prisma.conversation.findFirst({
       where: { id: conversationId, contact: { organizationId } },
@@ -131,9 +211,19 @@ export class ChatService {
     if (!c) throw new NotFoundException('Conversación no encontrada');
   }
 
-  async getConversations(organizationId: string): Promise<Conversation[]> {
+  async getConversations(
+    organizationId: string,
+    userId?: string,
+    userRole?: string,
+  ): Promise<Conversation[]> {
+    const where: any = { contact: { organizationId } };
+
+    if (userRole === 'AGENT' && userId) {
+      where.assignedToUserId = userId;
+    }
+
     const list = await this.prisma.conversation.findMany({
-      where: { contact: { organizationId } },
+      where,
       include: {
         contact: true,
         messages: {
@@ -156,6 +246,8 @@ export class ChatService {
           lastMessagePreview: lastMsg?.body.slice(0, 80) ?? '',
           lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
           unreadCount,
+          assignedToUserId: c.assignedToUserId,
+          isNewLead: c.isNewLead,
         };
       }),
     );
@@ -187,8 +279,10 @@ export class ChatService {
 
   async getConversationsWithWindowStatus(
     organizationId: string,
+    userId?: string,
+    userRole?: string,
   ): Promise<Array<Conversation & { canSend: boolean; windowSecondsRemaining: number }>> {
-    const list = await this.getConversations(organizationId);
+    const list = await this.getConversations(organizationId, userId, userRole);
     const result = await Promise.all(
       list.map(async (c) => {
         const [canSend, windowSecondsRemaining] = await Promise.all([
@@ -204,9 +298,11 @@ export class ChatService {
   async getMessages(
     conversationId: string, 
     organizationId: string, 
-    cursor?: string
+    cursor?: string,
+    userId?: string,
+    userRole?: string,
   ): Promise<{ messages: Message[]; nextCursor: string | null }> {
-    await this.assertConversationInOrg(conversationId, organizationId);
+    await this.assertConversationAccess(conversationId, organizationId, userId, userRole);
     
     const take = 50;
     const rows = await this.prisma.message.findMany({
@@ -238,8 +334,8 @@ export class ChatService {
     return { messages, nextCursor };
   }
 
-  async getGallery(conversationId: string, organizationId: string): Promise<Message[]> {
-    await this.assertConversationInOrg(conversationId, organizationId);
+  async getGallery(conversationId: string, organizationId: string, userId?: string, userRole?: string): Promise<Message[]> {
+    await this.assertConversationAccess(conversationId, organizationId, userId, userRole);
     const rows = await this.prisma.message.findMany({
       where: { 
         conversationId,
@@ -249,7 +345,7 @@ export class ChatService {
           { body: { contains: 'https://', mode: 'insensitive' } }
         ]
       },
-      orderBy: { whatsappTimestamp: 'desc' }, // Descending for gallery view
+      orderBy: { whatsappTimestamp: 'desc' },
     });
     return rows.map((m) => ({
       id: m.id,
@@ -265,8 +361,8 @@ export class ChatService {
     }));
   }
 
-  async searchMessages(conversationId: string, organizationId: string, query: string): Promise<Message[]> {
-    await this.assertConversationInOrg(conversationId, organizationId);
+  async searchMessages(conversationId: string, organizationId: string, query: string, userId?: string, userRole?: string): Promise<Message[]> {
+    await this.assertConversationAccess(conversationId, organizationId, userId, userRole);
     if (!query || query.trim().length === 0) return [];
     
     const rows = await this.prisma.message.findMany({
@@ -291,6 +387,8 @@ export class ChatService {
   async getConversation(
     conversationId: string,
     organizationId: string,
+    userId?: string,
+    userRole?: string,
   ): Promise<Conversation | undefined> {
     const c = await this.prisma.conversation.findFirst({
       where: { id: conversationId, contact: { organizationId } },
@@ -303,6 +401,11 @@ export class ChatService {
       },
     });
     if (!c) return undefined;
+
+    if (userRole === 'AGENT' && userId && c.assignedToUserId !== userId) {
+      return undefined;
+    }
+
     const lastMsg = c.messages[0];
     const unreadCount = await this.getUnreadCount(conversationId);
     return {
@@ -314,6 +417,8 @@ export class ChatService {
       lastMessagePreview: lastMsg?.body.slice(0, 80) ?? '',
       lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
       unreadCount,
+      assignedToUserId: c.assignedToUserId,
+      isNewLead: c.isNewLead,
     };
   }
 
@@ -394,19 +499,64 @@ export class ChatService {
   ): Promise<{ text: string; usedFallbackModel?: boolean }> {
     await this.assertConversationInOrg(conversationId, organizationId);
     
-    // Fetch last 10 messages for context
     const rows = await this.prisma.message.findMany({
       where: { conversationId },
       orderBy: { whatsappTimestamp: 'desc' },
       take: 10,
     });
     
-    // Reverse to chronological order
     const recent = rows
       .reverse()
       .map((m) => (m.direction === MessageDirection.IN ? `Cliente: ${m.body}` : `Agente: ${m.body}`));
       
     const context = recent.join('\n');
     return this.ai.generateReply(organizationId, context);
+  }
+
+  async assignConversation(
+    conversationId: string,
+    organizationId: string,
+    assignToUserId: string | null,
+  ): Promise<void> {
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, contact: { organizationId } },
+    });
+    if (!conv) throw new NotFoundException('Conversación no encontrada');
+
+    if (assignToUserId) {
+      const user = await this.prisma.user.findFirst({
+        where: { id: assignToUserId, organizationId },
+      });
+      if (!user) throw new BadRequestException('Usuario no encontrado en esta organización');
+    }
+
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        assignedToUserId: assignToUserId,
+        assignedAt: assignToUserId ? new Date() : null,
+      },
+    });
+
+    if (assignToUserId) {
+      this.chatGateway.emitConversationAssigned(organizationId, conversationId, assignToUserId);
+    }
+  }
+
+  private async assertConversationAccess(
+    conversationId: string,
+    organizationId: string,
+    userId?: string,
+    userRole?: string,
+  ): Promise<void> {
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, contact: { organizationId } },
+      select: { id: true, assignedToUserId: true },
+    });
+    if (!conv) throw new NotFoundException('Conversación no encontrada');
+
+    if (userRole === 'AGENT' && userId && conv.assignedToUserId !== userId) {
+      throw new ForbiddenException('No tienes acceso a esta conversación');
+    }
   }
 }

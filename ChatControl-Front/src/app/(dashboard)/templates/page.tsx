@@ -43,6 +43,7 @@ export default function TemplatesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [refreshingMeta, setRefreshingMeta] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -102,8 +103,11 @@ export default function TemplatesPage() {
   return (
     <div style={{ display: 'flex', width: '100%', height: '100vh', background: '#040404', color: '#F2F2F2', overflow: 'hidden' }}>
       
+      {/* Mobile sidebar backdrop */}
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+
       {/* ── Sidebar: Biblioteca ── */}
-      <aside style={{ width: '380px', borderRight: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', background: '#080808' }}>
+      <aside className={`aside-sidebar${sidebarOpen ? ' open' : ''}`}>
         <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
             <h2 style={{ fontSize: '1.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em' }}>Plantillas</h2>
@@ -162,7 +166,7 @@ export default function TemplatesPage() {
       </aside>
 
       {/* ── Main: Visualización Maestra ── */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#040404', padding: '2rem 3rem', overflowY: 'auto' }} className="custom-scrollbar">
+      <main className="page-main custom-scrollbar">
         
         <div style={{ width: '100%', margin: '0' }}>
           
@@ -178,8 +182,17 @@ export default function TemplatesPage() {
               {/* Contenido de la plantilla ya existente... */}
               <header style={{ marginBottom: '3rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-                    <h1 style={{ fontSize: '2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', margin: 0 }}>{selectedTemplate.name}</h1>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                      <button 
+                        onClick={() => setSidebarOpen(true)} 
+                        className="mob-sidebar-btn"
+                        aria-label="Abrir lista de plantillas"
+                      >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+                        </svg>
+                      </button>
+                      <h1 style={{ fontSize: '2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', margin: 0 }}>{selectedTemplate.name}</h1>
                     <div style={{ padding: '0.2rem 0.6rem', background: 'rgba(74, 222, 128, 0.1)', border: '1px solid rgba(74, 222, 128, 0.2)', borderRadius: '6px', color: '#4ADE80', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase' }}>APROBADA</div>
                   </div>
                   <p style={{ color: '#666', fontSize: '0.95rem' }}>Estructura oficial sincronizada directamente desde el Business Manager de Meta.</p>
@@ -258,6 +271,21 @@ export default function TemplatesPage() {
           to { transform: rotate(360deg); }
         }
         .spin { animation: spin 1s linear infinite; }
+
+        .mob-sidebar-btn {
+          display: none;
+          width: 40px; height: 40px;
+          border-radius: 10px;
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.05);
+          color: #8C8C8C;
+          cursor: pointer;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .mob-sidebar-btn:hover { background: rgba(255,255,255,0.08); color: #F2F2F2; }
+        @media (max-width: 768px) { .mob-sidebar-btn { display: flex; } }
       `}</style>
     </div>
   );

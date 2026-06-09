@@ -1076,3 +1076,109 @@
   font-size: 0.9rem;
   padding: 0.5rem 1rem;
 }
+
+/* ============================================================
+   RESPONSIVE — Mobile-first breakpoints
+   ============================================================ */
+
+/* Tablet & below: auto-collapse navbar, shrink sidebar */
+@media (max-width: 1024px) {
+  .navBar {
+    width: 72px !important;
+    min-width: 72px !important;
+  }
+  .navBar .navLabel { display: none; }
+  .navBar .navItems { align-items: center; }
+  .navBar .navItem,
+  .navBar .navItemActive {
+    width: 48px; min-width: 48px;
+    justify-content: center; padding-left: 0; padding-right: 0;
+  }
+  .navBar .navUserCard { justify-content: center; padding: 0.6rem 0; }
+  .navBar .navFooter { align-items: center; padding-left: 0; padding-right: 0; }
+  .navBar .navLogout { width: 48px; min-width: 48px; justify-content: center; padding: 0; }
+  .navBar .navUserWrap { justify-content: center; }
+  .navBar .navUserDropdown { left: 4px; }
+  .navBar .navToggle { align-self: center; margin-left: 0; }
+  .navBar .navHeader { justify-content: center; }
+  .navBar .navBrand { display: none; }
+}
+
+/* Mobile: sidebar as overlay */
+@media (max-width: 768px) {
+  .layout {
+    position: relative;
+  }
+
+  .navBar {
+    width: 56px !important;
+    min-width: 56px !important;
+    padding: 1rem 0.4rem;
+  }
+  .navBar .navHeader { height: 48px; min-height: 48px; margin-bottom: 0.5rem; justify-content: center; }
+  .navBar .navLogoImg { width: 28px; height: 28px; }
+  .navBar .navToggle { width: 32px; height: 32px; min-width: 32px; min-height: 32px; margin-bottom: 0.5rem; }
+  .navBar .navToggle svg { width: 18px; height: 18px; }
+  .navBar .navItem,
+  .navBar .navItemActive { min-height: 40px; width: 40px; min-width: 40px; }
+  .navBar .navUserCard { padding: 0.4rem 0; }
+
+  .sidebar {
+    position: fixed !important;
+    top: 0; left: 0; bottom: 0;
+    width: 320px !important;
+    max-width: 85vw !important;
+    min-width: 260px !important;
+    z-index: 100;
+    box-shadow: 4px 0 40px rgba(0,0,0,0.8);
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.16,1,0.3,1);
+  }
+  .sidebarVisible {
+    transform: translateX(0);
+  }
+
+  .main { margin-left: 0; }
+  .header { padding: 0.75rem 1rem; }
+
+  .messages { padding: 1rem; }
+  .msgUser, .msgAgent { max-width: 90%; }
+}
+
+/* Small mobile */
+@media (max-width: 480px) {
+  .navBar {
+    width: 48px !important;
+    min-width: 48px !important;
+    padding: 0.75rem 0.3rem;
+  }
+  .navBar .navHeader { height: 40px; min-height: 40px; }
+  .navBar .navLogoImg { width: 24px; height: 24px; }
+  .navBar .navItem,
+  .navBar .navItemActive { width: 36px; min-width: 36px; min-height: 36px; }
+  .navBar .navUserCard { padding: 0.3rem 0; }
+  .navBar .navUserAvatar { width: 24px; height: 24px; min-width: 24px; min-height: 24px; }
+  .navBar .navUserAvatar svg { width: 14px; height: 14px; }
+  .navBar .navToggle { width: 28px; height: 28px; min-width: 28px; min-height: 28px; }
+  .navBar .navToggle svg { width: 16px; height: 16px; }
+  .navBar .navLogout { width: 36px; min-width: 36px; }
+
+  .sidebar { width: 280px !important; min-width: 240px !important; }
+  .sidebarHeader { padding: 1rem 0.75rem; }
+  .sidebarHeader h2 { font-size: 0.8rem; }
+  .searchWrap { padding: 0.4rem 0.5rem; }
+  .searchInput { padding: 0.5rem 0.6rem 0.5rem 1.8rem; font-size: 0.75rem; background-size: 0.8rem; background-position: 0.5rem center; }
+  .convBtn { padding: 0.65rem 0.75rem; }
+  .convAvatar { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
+  .convAvatar svg { width: 20px; height: 20px; }
+  .convPhone { font-size: 0.85rem; }
+  .actions { padding: 0.75rem 1rem; }
+  .actionRow { gap: 0.35rem; }
+  .btnSecondary { padding: 0.45rem 0.75rem; font-size: 0.8rem; }
+  .input { padding: 0.5rem 0.75rem; font-size: 0.85rem; }
+  .textarea { padding: 0.5rem 0.75rem; font-size: 0.85rem; min-height: 50px; }
+  .msgUser, .msgAgent { max-width: 95%; padding: 0.5rem 0.85rem; font-size: 0.9rem; }
+  .headerAvatar { width: 40px; height: 40px; min-width: 40px; min-height: 40px; }
+  .headerAvatar svg { width: 22px; height: 22px; }
+  .headerPhone { font-size: 1rem; }
+}

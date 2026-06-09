@@ -120,6 +120,8 @@ export interface Conversation {
   lastMessageAt: number;
   /** Número de mensajes entrantes no leídos. */
   unreadCount?: number;
+  assignedToUserId?: string | null;
+  isNewLead?: boolean;
 }
 
 export interface Message {
@@ -458,6 +460,23 @@ export interface OrgOutboundAuditRow {
   fromAi: boolean;
   whatsappTimestamp: number;
   sentBy: { id: string; email: string; displayName: string | null } | null;
+}
+
+// Lead Detection Config
+export interface LeadDetectionConfig {
+  enabled: boolean;
+  autoMessage: string;
+}
+
+export async function getLeadDetectionConfig(): Promise<LeadDetectionConfig> {
+  return api<LeadDetectionConfig>('/org/integrations/lead-detection');
+}
+
+export async function updateLeadDetectionConfig(config: LeadDetectionConfig): Promise<LeadDetectionConfig> {
+  return api<LeadDetectionConfig>('/org/integrations/lead-detection', {
+    method: 'PATCH',
+    body: JSON.stringify(config),
+  });
 }
 
 export async function getOrgAuditOutbound(take?: number): Promise<OrgOutboundAuditRow[]> {

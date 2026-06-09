@@ -203,7 +203,7 @@ export default function OrgUsersPage() {
   const paginatedUsers = filteredUsers.slice(startIndex, startIndex + itemsPerPage);
 
   return (
-    <div style={{ padding: '2rem 3rem', width: '100%', margin: '0', position: 'relative' }}>
+    <div className="page-container" style={{ position: 'relative' }}>
       <header style={{ marginBottom: '1.5rem' }}>
         <h1 style={{ fontSize: '1.75rem', fontWeight: 900, color: '#F2F2F2', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
           Gestión de Usuarios
@@ -261,7 +261,7 @@ export default function OrgUsersPage() {
         </div>
       ) : (
         <>
-          <div style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, overflow: 'hidden' }}>
+          <div className="table-wrapper" style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(255,255,255,0.01)' }}>

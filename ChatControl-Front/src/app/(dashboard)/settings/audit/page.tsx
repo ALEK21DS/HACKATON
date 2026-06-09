@@ -46,7 +46,7 @@ export default function AuditPage() {
         Registro detallado de todos los mensajes enviados a través de la API y campañas masivas.
       </p>
 
-      <div style={{ overflowX: 'auto', background: 'rgba(255,255,255,0.02)', borderRadius: 12, border: '1px solid rgba(64,64,64,0.3)' }}>
+      <div className="table-wrapper" style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 12, border: '1px solid rgba(64,64,64,0.3)' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
           <thead>
             <tr style={{ background: 'rgba(255,255,255,0.05)', color: '#EF4444' }}>

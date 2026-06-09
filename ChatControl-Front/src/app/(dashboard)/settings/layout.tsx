@@ -30,11 +30,28 @@ function LogoutIcon({ className }: { className?: string }) {
   );
 }
 
+function MenuIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+    </svg>
+  );
+}
+
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [me, setMe] = useState<MeResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sidebarVisible, setSidebarVisible] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -50,7 +67,31 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 
   return (
     <div style={{ display: 'flex', flex: 1, minWidth: 0, overflow: 'hidden' }}>
-      <aside className={styles.sidebar}>
+      {/* Mobile sidebar backdrop */}
+      {sidebarVisible && (
+        <div
+          onClick={() => setSidebarVisible(false)}
+          className="sidebar-backdrop"
+          style={{ position: 'fixed', inset: 0, zIndex: 99, background: 'rgba(0,0,0,0.6)' }}
+        />
+      )}
+      {/* Hamburger toggle (mobile) */}
+      <button
+        type="button"
+        onClick={() => setSidebarVisible(v => !v)}
+        className={styles.navToggle}
+        style={{
+          position: 'fixed', top: '0.75rem', left: '0.75rem', zIndex: 101,
+          display: 'none',
+          width: 40, height: 40, borderRadius: 10,
+          background: '#0d0d0d', border: '1px solid rgba(64,64,64,0.3)',
+          color: '#F2F2F2', cursor: 'pointer', alignItems: 'center', justifyContent: 'center',
+        }}
+        aria-label="Menú de configuración"
+      >
+        {sidebarVisible ? <CloseIcon /> : <MenuIcon />}
+      </button>
+      <aside className={`${styles.sidebar} ${sidebarVisible ? styles.sidebarVisible : ''}`}>
         {loading ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1.5rem' }}>
             <div className="pulse-heartbeat">
@@ -148,7 +189,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         )}
       </aside>
 
-      <main className={styles.main} style={{ flex: 1, display: 'flex', minWidth: 0 }}>
+      <main className={styles.main} style={{ flex: 1, display: 'flex', minWidth: 0, overflowY: 'auto' }}>
         {children}
       </main>
 

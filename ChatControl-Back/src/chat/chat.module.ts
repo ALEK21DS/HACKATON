@@ -9,6 +9,8 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { AiModule } from '../ai/ai.module';
 import { SettingsModule } from '../settings/settings.module';
+import { LeadAssignmentModule } from '../lead-assignment/lead-assignment.module';
+import { IntegrationsModule } from '../integrations/integrations.module';
 
 @Module({
   imports: [
@@ -24,6 +26,8 @@ import { SettingsModule } from '../settings/settings.module';
     forwardRef(() => WhatsAppModule),
     AiModule,
     SettingsModule,
+    forwardRef(() => LeadAssignmentModule),
+    IntegrationsModule,
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway],

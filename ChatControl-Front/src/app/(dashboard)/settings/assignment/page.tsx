@@ -155,7 +155,7 @@ export default function AssignmentPage() {
   if (!mounted || !isLoggedIn()) return null;
 
   return (
-    <div style={{ padding: '2rem 3rem', width: '100%', margin: '0' }}>
+    <div className="page-container">
       <header style={{ marginBottom: '2.5rem' }}>
         <h1 style={{ fontSize: '1.75rem', fontWeight: 900, color: '#F2F2F2', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
           Distribución de Leads

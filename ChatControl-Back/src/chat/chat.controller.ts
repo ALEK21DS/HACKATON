@@ -16,12 +16,18 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth.types';
 import { OrgMemberGuard } from '../auth/org-member.guard';
 import { ChatService } from './chat.service';
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional } from 'class-validator';
 
 class SendMessageDto {
   @IsString()
   @IsNotEmpty()
   text!: string;
+}
+
+class AssignConversationDto {
+  @IsOptional()
+  @IsString()
+  assignToUserId?: string | null;
 }
 
 @Controller('chat')
@@ -32,12 +38,12 @@ export class ChatController {
 
   @Get('conversations')
   async getConversations(@CurrentUser() user: AuthUser) {
-    return this.chat.getConversations(user.organizationId!);
+    return this.chat.getConversations(user.organizationId!, user.userId, user.role);
   }
 
   @Get('conversations/:id')
   async getConversation(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    const conv = await this.chat.getConversation(id, user.organizationId!);
+    const conv = await this.chat.getConversation(id, user.organizationId!, user.userId, user.role);
     if (!conv) return { ok: false, conversation: null };
     const [canSend, windowSecondsRemaining] = await Promise.all([
       this.chat.canSendToConversation(id, user.organizationId!),
@@ -57,12 +63,12 @@ export class ChatController {
     @Param('id') id: string,
     @Query('cursor') cursor?: string
   ) {
-    return this.chat.getMessages(id, user.organizationId!, cursor);
+    return this.chat.getMessages(id, user.organizationId!, cursor, user.userId, user.role);
   }
 
   @Get('conversations/:id/gallery')
   async getGallery(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.chat.getGallery(id, user.organizationId!);
+    return this.chat.getGallery(id, user.organizationId!, user.userId, user.role);
   }
 
   @Get('conversations/:id/search')
@@ -71,7 +77,7 @@ export class ChatController {
     @Param('id') id: string,
     @Query('q') query: string,
   ) {
-    return this.chat.searchMessages(id, user.organizationId!, query);
+    return this.chat.searchMessages(id, user.organizationId!, query, user.userId, user.role);
   }
 
   @Patch('conversations/:id/read')
@@ -104,5 +110,16 @@ export class ChatController {
   async generateReply(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const { text, usedFallbackModel } = await this.chat.generateAiReply(user.organizationId!, id);
     return { ok: true, text, usedFallbackModel };
+  }
+
+  @Post('conversations/:id/assign')
+  @Roles(UserRole.ORG_ADMIN)
+  async assignConversation(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: AssignConversationDto,
+  ) {
+    await this.chat.assignConversation(id, user.organizationId!, dto.assignToUserId ?? null);
+    return { ok: true };
   }
 }

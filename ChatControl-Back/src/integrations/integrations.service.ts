@@ -15,6 +15,11 @@ export interface UpdateIntegrationsDto {
   geminiApiKey?: string;
 }
 
+export interface LeadDetectionConfigDto {
+  enabled: boolean;
+  autoMessage: string;
+}
+
 @Injectable()
 export class IntegrationsService {
   constructor(
@@ -81,5 +86,38 @@ export class IntegrationsService {
     }
 
     return this.getStatus(organizationId);
+  }
+
+  private async getSetting(organizationId: string, key: string): Promise<string | null> {
+    const row = await this.prisma.organizationSetting.findUnique({
+      where: { organizationId_key: { organizationId, key } },
+    });
+    return row?.value ?? null;
+  }
+
+  private async setSetting(organizationId: string, key: string, value: string): Promise<void> {
+    await this.prisma.organizationSetting.upsert({
+      where: { organizationId_key: { organizationId, key } },
+      create: { organizationId, key, value },
+      update: { value },
+    });
+  }
+
+  async getLeadDetectionConfig(organizationId: string): Promise<LeadDetectionConfigDto> {
+    const enabled = await this.getSetting(organizationId, 'lead_detection_enabled');
+    const autoMessage = await this.getSetting(organizationId, 'lead_detection_message');
+    return {
+      enabled: enabled === 'true',
+      autoMessage: autoMessage ?? '',
+    };
+  }
+
+  async updateLeadDetectionConfig(
+    organizationId: string,
+    config: LeadDetectionConfigDto,
+  ): Promise<LeadDetectionConfigDto> {
+    await this.setSetting(organizationId, 'lead_detection_enabled', config.enabled ? 'true' : 'false');
+    await this.setSetting(organizationId, 'lead_detection_message', config.autoMessage);
+    return config;
   }
 }

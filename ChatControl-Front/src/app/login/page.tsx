@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import gsap from 'gsap';
-import { getMe, login, loginLegacy } from '@/lib/api';
+import { getMe, login, loginLegacy, logout } from '@/lib/api';
 
 type LoginMode = 'email' | 'phone';
 
@@ -96,7 +96,7 @@ export default function LoginPage() {
           .from('.login-shell', { autoAlpha: 0, duration: 0.45 })
           .from('.brand-panel', { x: desktop ? -28 : 0, y: desktop ? 0 : 18, autoAlpha: 0, duration: 0.7 }, '-=0.15')
           .from('.auth-panel', { x: desktop ? 28 : 0, y: desktop ? 0 : 18, autoAlpha: 0, duration: 0.7 }, '-=0.5')
-          .from('.login-stagger', { y: 14, autoAlpha: 0, duration: 0.45, stagger: 0.06 }, '-=0.35');
+          .to('.login-stagger', { y: 0, autoAlpha: 1, duration: 0.45, stagger: 0.06 }, '-=0.35');
       },
       containerRef,
     );
@@ -276,7 +276,11 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="login-stagger login-gloss-button group flex min-h-12 w-full items-center justify-between rounded-lg px-4 py-3 text-base font-black text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffdad7] disabled:cursor-wait disabled:opacity-70"
+                className="login-stagger group flex min-h-12 w-full items-center justify-between rounded-lg px-4 py-3 text-base font-black text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffdad7] disabled:cursor-wait disabled:opacity-70"
+                style={{
+                  background: 'linear-gradient(135deg, #ff5a5a 0%, #ef4444 38%, #b91a24 100%)',
+                  boxShadow: '0 18px 44px rgba(239, 68, 68, 0.28)',
+                }}
               >
                 <span>{loading ? 'Entrando...' : 'Entrar al panel'}</span>
                 <span className="flex h-9 w-9 items-center justify-center rounded-md bg-white/15 transition-transform group-hover:translate-x-0.5">
@@ -289,6 +293,18 @@ export default function LoginPage() {
               <p className="text-sm leading-6 text-[#8c8c8c]">
                 Usa las credenciales creadas por el administrador de tu organizacion. El acceso legacy por telefono queda disponible para migraciones.
               </p>
+              <button
+                type="button"
+                onClick={() => { logout(); router.refresh(); }}
+                className="mt-3 flex items-center gap-2 text-xs font-bold text-[#ef4444]/70 transition-colors hover:text-[#ef4444] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444]"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                <span>Cerrar sesion / Limpiar cache</span>
+              </button>
             </div>
           </div>
         </div>
