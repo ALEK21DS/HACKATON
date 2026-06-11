@@ -170,6 +170,17 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                     <span className={styles.navLabel}>Asignación de Chats</span>
                   </Link>
                 </li>
+                <li>
+                  <Link 
+                    href="/settings/crm-integration" 
+                    className={isActive('/settings/crm-integration') ? styles.navItemActive : styles.navItem}
+                  >
+                    <svg width="1.1rem" height="1.1rem" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: '0.2rem' }}>
+                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                    </svg>
+                    <span className={styles.navLabel}>Integración CRM</span>
+                  </Link>
+                </li>
               </>
             )}
           </ul>
