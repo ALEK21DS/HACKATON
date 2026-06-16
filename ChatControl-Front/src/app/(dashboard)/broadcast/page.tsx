@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { Socket, io } from 'socket.io-client';
 import {
@@ -11,9 +11,13 @@ import {
   getBroadcastTemplates,
   generateBroadcastMessage,
   sendBroadcast,
+  getCrmBroadcastLists,
+  previewBroadcastLists,
+  type BroadcastListPreview,
   type BroadcastContact,
   type BroadcastTemplate,
   type BroadcastMessageType,
+  type BroadcastListItem,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
@@ -57,11 +61,17 @@ function SparklesIcon({ style }: { style?: React.CSSProperties }) {
 
 export default function BroadcastPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
   const [contacts, setContacts] = useState<BroadcastContact[]>([]);
   const [templates, setTemplates] = useState<BroadcastTemplate[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [messageType, setMessageType] = useState<BroadcastMessageType>('manual');
+  const [broadcastLists, setBroadcastLists] = useState<BroadcastListItem[]>([]);
+  const [selectedListIds, setSelectedListIds] = useState<Set<string>>(new Set());
+  const [listPreview, setListPreview] = useState<BroadcastListPreview | null>(null);
+  const [contactSource, setContactSource] = useState<'manual' | 'segments' | 'crm_lists'>('manual');
+  const [loadingList, setLoadingList] = useState(false);
   const [text, setText] = useState('');
   const [templateId, setTemplateId] = useState('');
   const [templateVars, setTemplateVars] = useState<Record<string, string>>({});
@@ -74,20 +84,63 @@ export default function BroadcastPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const socketRef = useRef<Socket | null>(null);
 
+  const loadCrmLists = useCallback(async () => {
+    try {
+      const bl = await getCrmBroadcastLists();
+      setBroadcastLists(bl);
+    } catch {
+      setBroadcastLists([]);
+    }
+  }, []);
+
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (!mounted) return;
     if (!isLoggedIn()) { router.replace('/login'); return; }
+    const initialSource = searchParams?.get('source');
+    const initialLists = searchParams?.get('lists');
+    if (initialSource === 'crm') {
+      setContactSource('crm_lists');
+      if (initialLists) {
+        setSelectedListIds(new Set(initialLists.split(',').filter(Boolean)));
+      }
+    }
     (async () => {
       setLoading(true);
       try {
         const [cl, tl] = await Promise.all([getBroadcastContacts(), getBroadcastTemplates()]);
         setContacts(cl);
         setTemplates(tl);
+        await loadCrmLists();
       } catch (err) {} finally { setLoading(false); }
     })();
-  }, [mounted, router]);
+  }, [mounted, router, searchParams, loadCrmLists]);
+
+  const refreshListPreview = useCallback(async (listIds: string[]) => {
+    if (!listIds.length) {
+      setListPreview(null);
+      setSelectedIds(new Set());
+      return;
+    }
+    setLoadingList(true);
+    try {
+      const preview = await previewBroadcastLists(listIds);
+      setListPreview(preview);
+      setSelectedIds(new Set(preview.conversationIds));
+    } catch (err) {
+      console.error('Error loading list preview', err);
+      setListPreview(null);
+    } finally {
+      setLoadingList(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (contactSource === 'crm_lists' && selectedListIds.size > 0) {
+      refreshListPreview(Array.from(selectedListIds));
+    }
+  }, [contactSource, selectedListIds, refreshListPreview]);
 
   const toggleContact = (id: string) => {
     setSelectedIds((prev) => {
@@ -128,6 +181,28 @@ export default function BroadcastPage() {
     } catch (err) {} finally { setSending(false); }
   };
 
+  const toggleListSelection = (listId: string) => {
+    setSelectedListIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(listId)) next.delete(listId);
+      else next.add(listId);
+      return next;
+    });
+  };
+
+  const handleSourceChange = (source: 'manual' | 'segments' | 'crm_lists') => {
+    setContactSource(source);
+    setSelectedListIds(new Set());
+    setListPreview(null);
+    if (source === 'segments') {
+      setSelectedIds(new Set(contacts.map((c) => c.id)));
+    } else if (source === 'manual') {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set());
+    }
+  };
+
   const filteredContacts = contacts.filter(c => 
     c.phone.includes(searchQuery) || (c.name?.toLowerCase().includes(searchQuery.toLowerCase()))
   );
@@ -161,23 +236,121 @@ export default function BroadcastPage() {
               style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', padding: '0.75rem 1rem 0.75rem 2.8rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
             />
           </div>
-          <button 
-            onClick={toggleAll}
-            style={{ width: '100%', padding: '0.6rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', color: '#8C8C8C', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', cursor: 'pointer', transition: 'all 0.2s' }}
-          >
-            {selectedIds.size === contacts.length ? 'Desmarcar todos' : 'Seleccionar todos'}
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+            {([
+              ['manual', 'Contactos Manuales'],
+              ['segments', 'Segmentos'],
+              ['crm_lists', 'Listas CRM'],
+            ] as const).map(([source, label]) => (
+              <button
+                key={source}
+                type="button"
+                onClick={() => handleSourceChange(source)}
+                style={{
+                  flex: 1,
+                  minWidth: 90,
+                  padding: '0.5rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: contactSource === source ? '#EF4444' : 'rgba(255,255,255,0.03)',
+                  color: contactSource === source ? 'white' : '#8C8C8C',
+                  fontSize: '0.55rem',
+                  fontWeight: 800,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {contactSource === 'crm_lists' ? (
+            <div style={{ marginBottom: '0.75rem' }}>
+              <div style={{ fontSize: '0.65rem', color: '#666', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>
+                Selecciona una o varias listas
+              </div>
+              <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {broadcastLists.map((l) => (
+                  <label
+                    key={l.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: 10,
+                      background: selectedListIds.has(l.id) ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${selectedListIds.has(l.id) ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.05)'}`,
+                      cursor: 'pointer',
+                      fontSize: '0.8rem',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedListIds.has(l.id)}
+                      onChange={() => toggleListSelection(l.id)}
+                    />
+                    <span style={{ flex: 1 }}>{l.name}</span>
+                    <span style={{ color: '#666', fontSize: '0.7rem' }}>({l.contactCount})</span>
+                  </label>
+                ))}
+              </div>
+              {listPreview && (
+                <div style={{
+                  marginTop: 10,
+                  padding: '0.75rem',
+                  borderRadius: 10,
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  fontSize: '0.7rem',
+                  color: '#8C8C8C',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: 6,
+                }}>
+                  <span>Total: <strong style={{ color: '#F2F2F2' }}>{listPreview.total}</strong></span>
+                  <span>Únicos: <strong style={{ color: '#22c55e' }}>{listPreview.unique}</strong></span>
+                  <span>Duplicados: <strong style={{ color: '#f59e0b' }}>{listPreview.duplicates}</strong></span>
+                  <span>Inválidos: <strong style={{ color: '#ef4444' }}>{listPreview.invalid}</strong></span>
+                  <span style={{ gridColumn: '1 / -1' }}>Bloqueados: <strong style={{ color: '#ef4444' }}>{listPreview.blocked}</strong></span>
+                </div>
+              )}
+            </div>
+          ) : contactSource === 'manual' ? (
+            <button 
+              onClick={toggleAll}
+              style={{ width: '100%', padding: '0.6rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', color: '#8C8C8C', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '0.75rem' }}
+            >
+              {selectedIds.size === contacts.length ? 'Desmarcar todos' : 'Seleccionar todos'}
+            </button>
+          ) : (
+            <div style={{ padding: '0.75rem', marginBottom: '0.75rem', borderRadius: 10, background: 'rgba(239,68,68,0.06)', color: '#EF4444', fontSize: '0.75rem', fontWeight: 700 }}>
+              {selectedIds.size} contactos del segmento (todos los contactos de la organización)
+            </div>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }} className="custom-scrollbar">
-          {loading ? (
+          {loading || loadingList ? (
             <div style={{ padding: '4rem 2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
               <div className="pulse-heartbeat">
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="#EF4444">
                   <path d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </div>
-              <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.2em' }}>Cargando Audiencia</span>
+              <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.2em' }}>
+                {contactSource === 'crm_lists' ? 'Cargando Listas CRM' : contactSource === 'segments' ? 'Cargando Segmento' : 'Cargando Audiencia'}
+              </span>
+            </div>
+          ) : contactSource === 'crm_lists' && selectedListIds.size > 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#22c55e', fontSize: '0.9rem', fontWeight: 700 }}>
+              {selectedIds.size} contactos listos desde {selectedListIds.size} lista(s) CRM
+            </div>
+          ) : contactSource === 'segments' ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#22c55e', fontSize: '0.9rem', fontWeight: 700 }}>
+              Segmento completo: {selectedIds.size} contactos
             </div>
           ) : filteredContacts.map(c => (
             <div 
@@ -236,6 +409,11 @@ export default function BroadcastPage() {
                 </svg>
               </button>
               <h1 style={{ fontSize: '2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', marginBottom: '0.5rem' }}>Lanzamiento Masivo</h1>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+              <a href="/broadcast" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#EF4444', textTransform: 'uppercase', textDecoration: 'none' }}>Campañas</a>
+              <a href="/templates" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#666', textTransform: 'uppercase', textDecoration: 'none' }}>Templates</a>
+              <a href="/broadcast/crm-lists" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#666', textTransform: 'uppercase', textDecoration: 'none' }}>Listas CRM</a>
             </div>
             <p style={{ color: '#666', fontSize: '0.95rem' }}>Configura y dispara campañas masivas de alta tasa de apertura.</p>
           </header>
