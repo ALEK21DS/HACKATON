@@ -15,6 +15,8 @@ import { PlatformModule } from './platform/platform.module';
 import { OrgUsersModule } from './org-users/org-users.module';
 import { OrgAuditModule } from './org-audit/org-audit.module';
 import { LeadAssignmentModule } from './lead-assignment/lead-assignment.module';
+import { CrmIntegrationsModule } from './crm-integrations/crm-integrations.module';
+import { BroadcastListsModule } from './broadcast-lists/broadcast-lists.module';
 
 @Module({
   imports: [
@@ -26,10 +28,12 @@ import { LeadAssignmentModule } from './lead-assignment/lead-assignment.module';
     ChatModule,
     AiModule,
     BroadcastModule,
+    BroadcastListsModule,
     ContactsModule,
     TemplatesModule,
     SettingsModule,
     IntegrationsModule,
+    CrmIntegrationsModule,
     PlatformModule,
     OrgUsersModule,
     OrgAuditModule,

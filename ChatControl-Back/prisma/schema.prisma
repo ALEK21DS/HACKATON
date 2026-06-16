@@ -12,7 +12,6 @@ model Organization {
   id                    String                   @id @default(cuid())
   name                  String
   status                OrganizationStatus       @default(ACTIVE)
-  /// ID del número en Meta (metadata.phone_number_id). Índice para enrutar webhooks.
   whatsappPhoneNumberId String?                  @unique
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @default(now()) @updatedAt
@@ -21,6 +20,9 @@ model Organization {
   orgSettings           OrganizationSetting[]
   templates             Template[]
   users                 User[]
+  crmIntegration        CrmIntegration?
+  broadcastLists        BroadcastList[]
+  crmContactLinks       CrmContactLink[]
 }
 
 /// Credenciales sensibles cifradas (AES-256-GCM). Solo el backend descifra.
@@ -46,6 +48,108 @@ model OrganizationSetting {
   @@index([organizationId])
 }
 
+/// Integración con CRM externo por organización
+model CrmIntegration {
+  id                String   @id @default(cuid())
+  organizationId    String   @unique
+  codigoVinculacion String   @unique
+  apiKeyHash        String   @default("")
+  apiKeyEncrypted   String?
+  crmUrl            String?
+  crmName           String   @default("CRM")
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @default(now()) @updatedAt
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([codigoVinculacion])
+}
+
+/// Lista de contactos para broadcast (manual o desde CRM)
+model BroadcastList {
+  id              String               @id @default(cuid())
+  organizationId  String
+  name            String
+  source          String               @default("manual") // "manual" | "crm"
+  crmExportedAt   DateTime?
+  contactCount    Int                  @default(0)
+  createdBy       String?
+  assignedToUserId String?             // Usuario de ChatControl que recibe los contactos (CRM)
+  assignedToUser  User?                @relation("BroadcastListsAssigned", fields: [assignedToUserId], references: [id])
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @default(now()) @updatedAt
+  organization    Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contacts        BroadcastListContact[]
+  crmContactLinks  CrmContactLink[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([source])
+  @@index([assignedToUserId])
+}
+
+/// Contacto dentro de una lista de broadcast
+model BroadcastListContact {
+  id          String       @id @default(cuid())
+  listId      String
+  contactId   String
+  externalId  String?
+  campaign    String?
+  seller      String?
+  source      String?      @default("crm")
+  createdAt   DateTime     @default(now())
+  list        BroadcastList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  contact     Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, contactId])
+  @@index([listId])
+  @@index([contactId])
+}
+
+/// Vínculo entre contacto CRM y contacto ChatControl para trazabilidad
+model CrmContactLink {
+  id                  String          @id @default(cuid())
+  organizationId      String
+  crmLeadId           String          // ID del lead en el CRM
+  chatcontrolContactId String         // ID del contacto en ChatControl
+  phone               String
+  listId              String?         // Lista de broadcast asociada
+  assignedToUserId    String?         // Usuario de ChatControl que recibe el contacto
+  assignedToUser      User?           @relation("CrmContactLinksAssigned", fields: [assignedToUserId], references: [id])
+  externalData        Json?           // Datos adicionales del CRM (campaña, vendedor, etc.)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @default(now()) @updatedAt
+  organization        Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact             Contact         @relation(fields: [chatcontrolContactId], references: [id], onDelete: Cascade)
+  broadcastList       BroadcastList?  @relation(fields: [listId], references: [id])
+
+  @@unique([organizationId, crmLeadId])
+  @@index([organizationId])
+  @@index([phone])
+  @@index([chatcontrolContactId])
+  @@index([listId])
+  @@index([assignedToUserId])
+}
+
+/// Auditoría de integración CRM
+model CrmAuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  action         String   // "contacts_exported" | "list_created" | "connection_verified"
+  crmUser        String?
+  crmName        String?
+  contactsTotal  Int?
+  contactsCreated Int?
+  contactsUpdated Int?
+  contactsRejected Int?
+  listName       String?
+  details        Json?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([createdAt(sort: Desc)])
+}
+
 model User {
   id                String             @id @default(cuid())
   email             String             @unique
@@ -59,6 +163,8 @@ model User {
   platformAuditLogs     PlatformAuditLog[]
   organization          Organization?      @relation(fields: [organizationId], references: [id])
   assignedConversations Conversation[]     @relation("ConversationAssigned")
+  crmBroadcastLists     BroadcastList[]    @relation("BroadcastListsAssigned")
+  crmContactLinksAssigned CrmContactLink[] @relation("CrmContactLinksAssigned")
 
   @@index([organizationId])
   @@index([email])
@@ -88,6 +194,8 @@ model Contact {
   organizationId      String
   organization        Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   conversations       Conversation[]
+  broadcastListLinks  BroadcastListContact[]
+  crmContactLinks     CrmContactLink[]
 
   @@unique([organizationId, phone])
   @@index([phone])

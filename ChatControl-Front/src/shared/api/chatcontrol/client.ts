@@ -563,3 +563,118 @@ export async function sendMediaFile(
   if (!res.ok) throw new Error(data.message || res.statusText);
   return data;
 }
+
+// ── CRM Integration (ORG_ADMIN) ──
+
+export interface CrmIntegrationStatus {
+  connected: boolean;
+  codigoVinculacion: string | null;
+  crmUrl: string | null;
+  crmName: string | null;
+  isActive: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export async function getCrmCode(): Promise<{
+  codigoVinculacion: string;
+  isActive: boolean;
+  crmUrl: string | null;
+  crmName: string | null;
+  createdAt: string;
+  newCode?: boolean;
+}> {
+  return api('/crm-integrations/code');
+}
+
+export async function regenerateCrmCode(): Promise<{
+  codigoVinculacion: string;
+  isActive: boolean;
+}> {
+  return api('/crm-integrations/code/regenerate', { method: 'POST' });
+}
+
+export async function getCrmStatus(): Promise<CrmIntegrationStatus> {
+  return api('/crm-integrations/status');
+}
+
+export async function getCrmAuditLogs(): Promise<{
+  logs: Array<{
+    id: string;
+    action: string;
+    crmUser: string | null;
+    crmName: string | null;
+    contactsTotal: number;
+    contactsCreated: number;
+    contactsUpdated: number;
+    contactsRejected: number;
+    listName: string | null;
+    createdAt: string;
+  }>;
+}> {
+  return api('/crm-integrations/audit');
+}
+
+// ── Broadcast Lists ──
+
+export interface BroadcastListItem {
+  id: string;
+  name: string;
+  source: string | null;
+  contactCount: number;
+  crmExportedAt: string | null;
+  createdAt: string;
+}
+
+export interface BroadcastListContact {
+  id: string;
+  phone: string;
+  name: string | null;
+  externalId: string | null;
+  campaign: string | null;
+  seller: string | null;
+}
+
+export async function getBroadcastLists(): Promise<BroadcastListItem[]> {
+  return api<BroadcastListItem[]>('/broadcast-lists');
+}
+
+export async function getCrmBroadcastLists(): Promise<BroadcastListItem[]> {
+  return api<BroadcastListItem[]>('/broadcast-lists/crm');
+}
+
+export interface BroadcastListPreview {
+  total: number;
+  unique: number;
+  duplicates: number;
+  invalid: number;
+  blocked: number;
+  conversationIds: string[];
+}
+
+export async function previewBroadcastLists(listIds: string[]): Promise<BroadcastListPreview> {
+  return api<BroadcastListPreview>('/broadcast-lists/preview', {
+    method: 'POST',
+    body: JSON.stringify({ listIds }),
+  });
+}
+
+export async function getBroadcastListDetail(id: string): Promise<{
+  list: BroadcastListItem;
+  contacts: BroadcastListContact[];
+}> {
+  return api(`/broadcast-lists/${id}`);
+}
+
+export async function getBroadcastListContactIds(id: string): Promise<{
+  ok: boolean;
+  contactIds: string[];
+  conversationIds: string[];
+  count: number;
+}> {
+  return api(`/broadcast-lists/${id}/contacts`);
+}
+
+export async function deleteBroadcastList(id: string): Promise<{ ok: boolean }> {
+  return api(`/broadcast-lists/${id}`, { method: 'DELETE' });
+}
