@@ -12,6 +12,9 @@ import {
   getConversation,
   markConversationAsRead,
   sendMessage,
+  sendMediaFile,
+  getGallery,
+  updateContact,
   generateReply,
   type Conversation,
   type Message,
@@ -21,7 +24,7 @@ import { formatPhoneDisplay } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
 import styles from './chat.module.css';
 
-const WS_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const WS_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/api$/, '');
 
 // --- Icons ---
 function PersonIcon({ style }: { style?: React.CSSProperties }) {
@@ -80,6 +83,17 @@ export default function ChatPage() {
   const [typingHint, setTypingHint] = useState('');
   const [canSend, setCanSend] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // New details, lightbox and attachment states
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editSandbox, setEditSandbox] = useState(false);
+  const [updatingContact, setUpdatingContact] = useState(false);
+  const [gallery, setGallery] = useState<Message[]>([]);
+  const [loadingGallery, setLoadingGallery] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   
   const socketRef = useRef<Socket | null>(null);
   const selectedIdRef = useRef<string | null>(null);
@@ -101,7 +115,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!mounted || !isLoggedIn()) return;
     const token = localStorage.getItem('chatcontrol_token');
-    const socket = io(WS_BASE, { transports: ['websocket'], auth: { token: token || '' } });
+    const socket = io(WS_BASE, { auth: { token: token || '' } });
     socketRef.current = socket;
 
     socket.on('new_message', (payload: NewMessagePayload) => {
@@ -202,6 +216,63 @@ export default function ChatPage() {
   );
 
   const selectedConv = conversations.find(c => c.id === selectedId);
+
+  useEffect(() => {
+    if (selectedConv) {
+      setEditName(selectedConv.name || '');
+      setEditSandbox(selectedConv.isSandboxAuthorized || false);
+    }
+    if (selectedId && detailsOpen) {
+      setLoadingGallery(true);
+      getGallery(selectedId)
+        .then(res => setGallery(res))
+        .catch(() => {})
+        .finally(() => setLoadingGallery(false));
+    }
+  }, [selectedId, detailsOpen, selectedConv]);
+
+  async function handleUpdateContact(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedConv?.contactId || updatingContact) return;
+    setUpdatingContact(true);
+    try {
+      await updateContact(selectedConv.contactId, {
+        name: editName.trim() || undefined,
+        isSandboxAuthorized: editSandbox,
+      });
+      await loadConversations(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error al guardar contacto');
+    } finally {
+      setUpdatingContact(false);
+    }
+  }
+
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !selectedId) return;
+
+    let type: 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' = 'DOCUMENT';
+    if (file.type.startsWith('image/')) {
+      type = 'IMAGE';
+    } else if (file.type.startsWith('video/')) {
+      type = 'VIDEO';
+    } else if (file.type.startsWith('audio/')) {
+      type = 'AUDIO';
+    }
+
+    setSending(true);
+    try {
+      await sendMediaFile(selectedId, file, type);
+      const msgRes = await getMessages(selectedId);
+      setMessages(msgRes.messages);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error al enviar archivo');
+    } finally {
+      setSending(false);
+      if (e.target) e.target.value = '';
+    }
+  }
 
   if (!mounted) return null;
 
@@ -315,7 +386,20 @@ export default function ChatPage() {
                   </div>
                 </div>
               </div>
-              <button style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', color: '#8C8C8C', padding: '0.6rem 1.2rem', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}>
+              <button 
+                onClick={() => setDetailsOpen(!detailsOpen)}
+                style={{ 
+                  background: detailsOpen ? 'rgba(239, 68, 68, 0.1)' : 'rgba(255,255,255,0.03)', 
+                  border: detailsOpen ? '1px solid #EF4444' : '1px solid rgba(255,255,255,0.05)', 
+                  color: detailsOpen ? '#EF4444' : '#8C8C8C', 
+                  padding: '0.6rem 1.2rem', 
+                  borderRadius: '10px', 
+                  fontSize: '0.75rem', 
+                  fontWeight: 700, 
+                  cursor: 'pointer', 
+                  transition: 'all 0.2s' 
+                }}
+              >
                 VER DETALLES
               </button>
             </header>
@@ -341,19 +425,99 @@ export default function ChatPage() {
                   
                   {messages.map((m) => {
                     const isAgent = !m.fromUser;
+                    const hasMedia = !!m.mediaUrl;
+                    const isImage = m.type === 'IMAGE';
+                    const isVideo = m.type === 'VIDEO';
+                    const isAudio = m.type === 'AUDIO';
+                    const isDocument = m.type === 'DOCUMENT';
+                    const isSticker = isImage && m.mimeType?.toLowerCase() === 'image/webp';
+
                     return (
                       <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAgent ? 'flex-end' : 'flex-start', maxWidth: '75%', alignSelf: isAgent ? 'flex-end' : 'flex-start' }}>
                         <div style={{ 
-                          padding: '1rem 1.25rem', 
+                          padding: (isImage || isVideo) && !m.text ? '0' : '1rem 1.25rem', 
                           borderRadius: isAgent ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
-                          background: isAgent ? 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)' : '#1A1A1A',
+                          background: isSticker
+                            ? 'transparent'
+                            : (isImage || isVideo) && !m.text
+                              ? 'transparent'
+                              : isAgent 
+                                ? 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)' 
+                                : '#1A1A1A',
                           color: 'white',
                           fontSize: '0.95rem',
                           lineHeight: '1.5',
-                          boxShadow: isAgent ? '0 10px 25px rgba(239, 68, 68, 0.15)' : 'none',
-                          border: isAgent ? 'none' : '1px solid rgba(255,255,255,0.05)'
+                          boxShadow: isSticker || ((isImage || isVideo) && !m.text) ? 'none' : isAgent ? '0 10px 25px rgba(239, 68, 68, 0.15)' : 'none',
+                          border: isSticker || ((isImage || isVideo) && !m.text) ? 'none' : isAgent ? 'none' : '1px solid rgba(255,255,255,0.05)',
+                          overflow: 'hidden'
                         }}>
-                          {m.text}
+                          {hasMedia && (
+                            <div style={{ marginBottom: m.text ? '0.75rem' : '0' }}>
+                              {isImage && (
+                                <img 
+                                  src={m.mediaUrl!} 
+                                  alt={m.fileName || "Imagen"} 
+                                  onClick={() => setLightboxUrl(m.mediaUrl!)}
+                                  style={{ 
+                                    maxWidth: isSticker ? '120px' : '100%', 
+                                    maxHeight: isSticker ? '120px' : '300px', 
+                                    borderRadius: isSticker ? '0' : '16px', 
+                                    display: 'block',
+                                    objectFit: 'contain',
+                                    cursor: 'zoom-in'
+                                  }} 
+                                />
+                              )}
+                              {isVideo && (
+                                <video 
+                                  src={m.mediaUrl!} 
+                                  controls 
+                                  style={{ 
+                                    maxWidth: '100%', 
+                                    maxHeight: '300px', 
+                                    borderRadius: '16px', 
+                                    display: 'block' 
+                                  }} 
+                                />
+                              )}
+                              {isAudio && (
+                                <audio 
+                                  src={m.mediaUrl!} 
+                                  controls 
+                                  style={{ 
+                                    maxWidth: '100%', 
+                                    display: 'block' 
+                                  }} 
+                                />
+                              )}
+                              {isDocument && (
+                                <a 
+                                  href={m.mediaUrl!} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '0.75rem', 
+                                    color: isAgent ? '#FFF' : '#EF4444', 
+                                    textDecoration: 'none', 
+                                    background: 'rgba(255,255,255,0.06)',
+                                    padding: '0.75rem 1rem',
+                                    borderRadius: '12px',
+                                    border: '1px solid rgba(255,255,255,0.1)'
+                                  }}
+                                >
+                                  <svg style={{ width: '1.5rem', height: '1.5rem', flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                                  </svg>
+                                  <span style={{ fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {m.fileName || "Descargar documento"}
+                                  </span>
+                                </a>
+                              )}
+                            </div>
+                          )}
+                          {m.text && <div style={{ wordBreak: 'break-word' }}>{m.text}</div>}
                         </div>
                         <span style={{ fontSize: '0.65rem', color: '#444', marginTop: '0.4rem', fontWeight: 700 }}>
                           {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -374,9 +538,21 @@ export default function ChatPage() {
             {/* Footer de Entrada */}
             <footer style={{ padding: '1.5rem 2rem', background: '#040404' }}>
               <div style={{ background: '#0D0D0D', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '20px', padding: '0.5rem', display: 'flex', alignItems: 'flex-end', gap: '0.5rem', boxShadow: '0 -10px 40px rgba(0,0,0,0.5)' }}>
-                <button style={{ padding: '0.75rem', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }} title="Adjuntar">
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{ padding: '0.75rem', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }} 
+                  title="Adjuntar"
+                  disabled={!canSend}
+                >
                   <GalleryIcon />
                 </button>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileSelect} 
+                  style={{ display: 'none' }} 
+                  accept="image/*,video/*,audio/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain"
+                />
                 <textarea 
                   value={replyInput}
                   onChange={(e) => setReplyInput(e.target.value)}
@@ -427,6 +603,182 @@ export default function ChatPage() {
         )}
       </main>
 
+      {/* ── Sidebar: Detalles de Contacto ── */}
+      {detailsOpen && selectedConv && (
+        <aside style={{
+          width: '340px',
+          minWidth: '300px',
+          background: '#0d0d0d',
+          borderLeft: '1px solid rgba(255,255,255,0.05)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflowY: 'auto',
+          zIndex: 15,
+          padding: '1.5rem',
+          animation: 'slideInRight 0.3s ease-out',
+        }} className="custom-scrollbar">
+          {/* Cabecera */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, color: '#EF4444' }}>
+              Detalles
+            </h3>
+            <button 
+              onClick={() => setDetailsOpen(false)}
+              style={{ background: 'none', border: 'none', color: '#8C8C8C', cursor: 'pointer', fontSize: '1.2rem', padding: '0.2rem' }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Información del Perfil */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginBottom: '2rem', gap: '0.75rem' }}>
+            <div style={{ width: '80px', height: '80px', borderRadius: '24px', background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2.5rem' }}>
+              <PersonIcon style={{ width: '2.5rem', height: '2.5rem' }} />
+            </div>
+            <div>
+              <h4 style={{ margin: '0 0 0.25rem 0', fontSize: '1.1rem', fontWeight: 800 }}>
+                {selectedConv.name || 'Sin Nombre'}
+              </h4>
+              <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 600 }}>
+                {formatPhoneDisplay(selectedConv.phone)}
+              </span>
+            </div>
+          </div>
+
+          {/* Formulario de Edición */}
+          <form onSubmit={handleUpdateContact} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '2rem', marginBottom: '2rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Nombre
+              </label>
+              <input 
+                type="text" 
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Nombre del contacto"
+                style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', padding: '0.75rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
+              />
+            </div>
+
+            <div style={{ background: 'rgba(239, 68, 68, 0.02)', border: '1px solid rgba(239, 68, 68, 0.1)', borderRadius: '14px', padding: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#EF4444', display: 'block', marginBottom: '0.2rem' }}>
+                  Sandbox
+                </span>
+                <p style={{ margin: 0, fontSize: '0.65rem', color: '#666', lineHeight: '1.3' }}>
+                  Permitir mensajería en pruebas.
+                </p>
+              </div>
+              <div 
+                onClick={() => setEditSandbox(!editSandbox)}
+                style={{ 
+                  width: '42px', height: '22px', borderRadius: '11px', background: editSandbox ? '#EF4444' : '#1A1A1A', position: 'relative', cursor: 'pointer', transition: 'all 0.3s ease'
+                }}
+              >
+                <div style={{ width: '14px', height: '14px', borderRadius: '50%', background: 'white', position: 'absolute', top: '4px', left: editSandbox ? '24px' : '4px', transition: 'all 0.3s' }}></div>
+              </div>
+            </div>
+
+            <button 
+              type="submit" 
+              disabled={updatingContact}
+              style={{ width: '100%', padding: '0.75rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '10px', color: 'white', fontWeight: 900, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 5px 15px rgba(239, 68, 68, 0.2)', opacity: updatingContact ? 0.6 : 1 }}
+            >
+              {updatingContact ? 'Guardando...' : 'Guardar Cambios'}
+            </button>
+          </form>
+
+          {/* Galería de archivos multimedia compartidos */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1 }}>
+            <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Archivos y Multimedia
+            </label>
+            {loadingGallery ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem 0' }}>
+                <Spinner />
+              </div>
+            ) : gallery.length === 0 ? (
+              <p style={{ fontSize: '0.8rem', color: '#666', fontStyle: 'italic', margin: 0 }}>
+                No hay archivos compartidos.
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' }}>
+                {gallery.map(g => {
+                  if (g.type === 'IMAGE' && g.mediaUrl) {
+                    return (
+                      <div 
+                        key={g.id} 
+                        onClick={() => setLightboxUrl(g.mediaUrl!)}
+                        style={{ aspectRatio: '1', borderRadius: '8px', overflow: 'hidden', background: '#1A1A1A', border: '1px solid rgba(255,255,255,0.05)', cursor: 'zoom-in' }}
+                      >
+                        <img src={g.mediaUrl} alt="galería" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      </div>
+                    );
+                  } else if (g.type === 'VIDEO' && g.mediaUrl) {
+                    return (
+                      <div key={g.id} style={{ aspectRatio: '1', borderRadius: '8px', overflow: 'hidden', background: '#1A1A1A', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                        <video src={g.mediaUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }}>
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+                        </div>
+                      </div>
+                    );
+                  } else if (g.mediaUrl) {
+                    return (
+                      <a 
+                        key={g.id} 
+                        href={g.mediaUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        title={g.fileName || 'Archivo'}
+                        style={{ aspectRatio: '1', borderRadius: '8px', overflow: 'hidden', background: '#1A1A1A', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.25rem', color: '#EF4444', textDecoration: 'none', padding: '0.25rem' }}
+                      >
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        <span style={{ fontSize: '0.65rem', width: '100%', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#8C8C8C' }}>
+                          {g.fileName || 'Doc'}
+                        </span>
+                      </a>
+                    );
+                  }
+                  return null;
+                })}
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
+
+      {/* Lightbox / Fullscreen Image Preview */}
+      {lightboxUrl && (
+        <div 
+          onClick={() => setLightboxUrl(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(4, 4, 4, 0.95)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            cursor: 'zoom-out',
+            backdropFilter: 'blur(10px)',
+          }}
+        >
+          <img 
+            src={lightboxUrl} 
+            alt="Vista Previa" 
+            style={{ 
+              maxWidth: '90%', 
+              maxHeight: '90%', 
+              objectFit: 'contain',
+              borderRadius: '8px',
+              boxShadow: '0 10px 40px rgba(0,0,0,0.8)',
+              animation: 'fadeIn 0.2s ease-out'
+            }} 
+          />
+        </div>
+      )}
+
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -473,6 +825,16 @@ export default function ChatPage() {
         }
         @media (max-width: 768px) {
           .mobile-sidebar-toggle { display: flex; }
+        }
+
+        @keyframes slideInRight {
+          from { transform: translateX(100%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
       `}</style>
     </div>

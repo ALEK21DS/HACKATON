@@ -302,6 +302,7 @@ export class BroadcastService {
       fromUser: false,
       text: displayText,
       timestamp: now.getTime(),
+      type: MessageType.TEXT,
     });
   }
 
@@ -344,6 +345,7 @@ export class BroadcastService {
       fromUser: false,
       text,
       timestamp: now.getTime(),
+      type: MessageType.TEXT,
     });
   }
 

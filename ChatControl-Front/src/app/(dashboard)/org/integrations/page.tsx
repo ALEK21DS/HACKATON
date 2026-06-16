@@ -96,7 +96,11 @@ export default function IntegrationsPage() {
           router.replace('/chat');
           return;
         }
-        setStatus(await getIntegrationStatus());
+        const s = await getIntegrationStatus();
+        setStatus(s);
+        if (s.whatsappPhoneNumberId) {
+          setWaPhoneId(s.whatsappPhoneNumberId);
+        }
         setLeadConfig(await getLeadDetectionConfig());
       } catch {
         router.replace('/login');
@@ -262,17 +266,21 @@ export default function IntegrationsPage() {
                 width: 8,
                 height: 8,
                 borderRadius: '50%',
-                background: status.hasWhatsappToken ? '#4ADE80' : '#EF4444',
-                boxShadow: `0 0 10px ${status.hasWhatsappToken ? 'rgba(74, 222, 128, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                background: (status.hasWhatsappToken && status.hasWhatsappBusinessAccountId) ? '#4ADE80' : '#EF4444',
+                boxShadow: `0 0 10px ${(status.hasWhatsappToken && status.hasWhatsappBusinessAccountId) ? 'rgba(74, 222, 128, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
               }} />
               <span style={{ fontSize: '0.9rem', color: '#F2F2F2', fontWeight: 600 }}>
-                {status.hasWhatsappToken ? 'ACTIVO' : 'PENDIENTE'}
+                {(status.hasWhatsappToken && status.hasWhatsappBusinessAccountId) ? 'ACTIVO' : 'INCOMPLETO'}
               </span>
               {status.whatsappPhoneNumberId && (
                 <span style={{ fontSize: '0.75rem', color: '#8C8C8C' }}>
                   (ID: {status.whatsappPhoneNumberId})
                 </span>
               )}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#8C8C8C', marginTop: '0.25rem' }}>
+              • Token: {status.hasWhatsappToken ? 'Configurado ✅' : 'Pendiente ❌'}<br />
+              • WABA ID: {status.hasWhatsappBusinessAccountId ? 'Configurado ✅' : 'Pendiente (Requerido para plantillas) ❌'}
             </div>
           </div>
           <div style={{ width: '1px', background: 'rgba(64,64,64,0.3)' }} />
@@ -391,7 +399,7 @@ export default function IntegrationsPage() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <label style={{ fontSize: '0.8rem', color: '#8C8C8C', fontWeight: 600, textTransform: 'uppercase' }}>
-                  WABA ID (Opcional)
+                  WABA ID (Requerido para plantillas)
                 </label>
                 <input
                   type="text"

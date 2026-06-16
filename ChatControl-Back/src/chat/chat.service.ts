@@ -9,6 +9,7 @@ import { SettingsService } from '../settings/settings.service';
 import { ChatGateway } from './chat.gateway';
 import { LeadAssignmentService } from '../lead-assignment/lead-assignment.service';
 import { IntegrationsService } from '../integrations/integrations.service';
+import { StorageService } from '../common/storage.service';
 
 export interface Message {
   id: string;
@@ -27,6 +28,7 @@ export interface Conversation {
   id: string;
   phone: string;
   name?: string;
+  contactId?: string;
   isSandboxAuthorized?: boolean;
   lastUserMessageAt: number | null;
   lastMessagePreview: string;
@@ -62,6 +64,7 @@ export class ChatService {
     private readonly config: ConfigService,
     private readonly leadAssignment: LeadAssignmentService,
     private readonly integrations: IntegrationsService,
+    private readonly storage: StorageService,
   ) {}
 
   async registerIncomingMessage(payload: {
@@ -143,6 +146,8 @@ export class ChatService {
         timestamp: payload.timestamp,
         mediaUrl: payload.mediaUrl,
         mimeType: payload.mimeType,
+        fileName: payload.fileName,
+        type: payload.type || MessageType.TEXT,
       } as any,
     );
   }
@@ -240,13 +245,21 @@ export class ChatService {
       list.map(async (c) => {
         const lastMsg = c.messages[0];
         const unreadCount = await this.getUnreadCount(c.id);
+        let lastMessagePreview = lastMsg?.body.slice(0, 80) ?? '';
+        if (lastMsg && !lastMessagePreview) {
+          if (lastMsg.type === MessageType.IMAGE) lastMessagePreview = '📷 Imagen';
+          else if (lastMsg.type === MessageType.VIDEO) lastMessagePreview = '🎥 Video';
+          else if (lastMsg.type === MessageType.AUDIO) lastMessagePreview = '🎵 Audio';
+          else if (lastMsg.type === MessageType.DOCUMENT) lastMessagePreview = '📄 Documento';
+        }
         return {
           id: c.id,
           phone: c.contact.phone,
           name: c.contact.name ?? undefined,
+          contactId: c.contact.id,
           isSandboxAuthorized: c.contact.isSandboxAuthorized,
           lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
-          lastMessagePreview: lastMsg?.body.slice(0, 80) ?? '',
+          lastMessagePreview,
           lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
           unreadCount,
           assignedToUserId: c.assignedToUserId,
@@ -411,13 +424,21 @@ export class ChatService {
 
     const lastMsg = c.messages[0];
     const unreadCount = await this.getUnreadCount(conversationId);
+    let lastMessagePreview = lastMsg?.body.slice(0, 80) ?? '';
+    if (lastMsg && !lastMessagePreview) {
+      if (lastMsg.type === MessageType.IMAGE) lastMessagePreview = '📷 Imagen';
+      else if (lastMsg.type === MessageType.VIDEO) lastMessagePreview = '🎥 Video';
+      else if (lastMsg.type === MessageType.AUDIO) lastMessagePreview = '🎵 Audio';
+      else if (lastMsg.type === MessageType.DOCUMENT) lastMessagePreview = '📄 Documento';
+    }
     return {
       id: c.id,
       phone: c.contact.phone,
       name: c.contact.name ?? undefined,
+      contactId: c.contact.id,
       isSandboxAuthorized: c.contact.isSandboxAuthorized,
       lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
-      lastMessagePreview: lastMsg?.body.slice(0, 80) ?? '',
+      lastMessagePreview,
       lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
       unreadCount,
       assignedToUserId: c.assignedToUserId,
@@ -491,7 +512,88 @@ export class ChatService {
       text: created.body,
       timestamp: created.whatsappTimestamp.getTime(),
       fromAi: created.fromAi ?? undefined,
+      type: created.type,
+      mediaUrl: created.mediaUrl,
+      mimeType: created.mimeType,
+      fileName: created.fileName,
     };
+    this.chatGateway.emitNewMessage(params.organizationId, params.conversationId, msg);
+    return msg;
+  }
+
+  async sendMediaMessage(params: {
+    organizationId: string;
+    conversationId: string;
+    file: any;
+    type: MessageType;
+    sentByUserId?: string | null;
+  }): Promise<Message> {
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id: params.conversationId, contact: { organizationId: params.organizationId } },
+      include: { contact: true },
+    });
+    if (!conv) throw new BadRequestException('Conversación no encontrada');
+    const isSandbox = this.config.get<string>('WHATSAPP_SANDBOX', 'true') === 'true';
+    if (isSandbox && !conv.contact.isSandboxAuthorized) {
+      throw new ForbiddenException(
+        'Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.',
+      );
+    }
+    await this.settings.checkDailyLimitOrThrow(params.conversationId, params.organizationId);
+
+    const timestamp = Date.now();
+    const path = `chats/${params.organizationId}/sent_${timestamp}_${params.file.originalname}`;
+    const mediaUrl = await this.storage.uploadFile(
+      'chat-media',
+      path,
+      params.file.buffer,
+      params.file.mimetype,
+    );
+    if (!mediaUrl) {
+      throw new BadRequestException('No se pudo subir el archivo multimedia');
+    }
+
+    const lastUserMessageAt = conv.lastUserMessageAt ? new Date(conv.lastUserMessageAt) : null;
+
+    const { messageId } = await this.whatsapp.sendMediaMessage(params.organizationId, {
+      to: conv.contact.phone,
+      mediaUrl,
+      type: params.type as any,
+      fileName: params.file.originalname,
+      lastUserMessageAt,
+    });
+
+    const now = new Date();
+    const created = await this.prisma.message.create({
+      data: {
+        conversationId: params.conversationId,
+        direction: MessageDirection.OUT,
+        type: params.type,
+        status: MessageStatus.SENT,
+        body: '',
+        whatsappMessageId: messageId,
+        whatsappTimestamp: now,
+        fromAi: false,
+        sentByUserId: params.sentByUserId ?? null,
+        mediaUrl,
+        mimeType: params.file.mimetype,
+        fileName: params.file.originalname,
+      },
+    });
+
+    const msg: Message = {
+      id: created.id,
+      conversationId: created.conversationId,
+      fromUser: false,
+      text: created.body,
+      timestamp: created.whatsappTimestamp.getTime(),
+      fromAi: created.fromAi ?? undefined,
+      type: created.type,
+      mediaUrl: created.mediaUrl,
+      mimeType: created.mimeType,
+      fileName: created.fileName,
+    };
+
     this.chatGateway.emitNewMessage(params.organizationId, params.conversationId, msg);
     return msg;
   }

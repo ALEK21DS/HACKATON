@@ -219,6 +219,56 @@ export class WhatsAppService {
     return { messageId };
   }
 
+  async sendMediaMessage(
+    organizationId: string,
+    params: {
+      to: string;
+      mediaUrl: string;
+      type: 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT';
+      fileName?: string;
+      lastUserMessageAt: Date | null;
+    },
+  ): Promise<{ messageId: string }> {
+    if (!this.window24h.canSendFreeMessage(params.lastUserMessageAt)) {
+      throw new BadRequestException(
+        'Ventana de 24 horas cerrada. No se puede enviar mensaje libre. El usuario debe escribir primero.',
+      );
+    }
+    const { accessToken, phoneNumberId } = await this.resolveCredentials(organizationId);
+    const normalized = params.to.replace(/\D/g, '');
+    if (!normalized) throw new BadRequestException('Número de destino inválido');
+    const url = `${this.baseUrl}/${phoneNumberId}/messages`;
+    const typeLower = params.type.toLowerCase();
+    const mediaObject: Record<string, unknown> = {
+      link: params.mediaUrl,
+    };
+    if (params.type === 'DOCUMENT' && params.fileName) {
+      mediaObject.filename = params.fileName;
+    }
+    const body = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: normalized,
+      type: typeLower,
+      [typeLower]: mediaObject,
+    };
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json()) as { error?: { message: string }; messages?: Array<{ id: string }> };
+    if (data.error) {
+      throw new BadRequestException(data.error.message || 'Error al enviar archivo por WhatsApp');
+    }
+    const messageId = data.messages?.[0]?.id;
+    if (!messageId) throw new BadRequestException('WhatsApp no devolvió ID de mensaje');
+    return { messageId };
+  }
+
   verifyWebhook(mode: string, token: string, challenge: string): string | null {
     const expectedToken = this.config.get<string>('WHATSAPP_VERIFY_TOKEN', '');
     if (mode === 'subscribe' && token === expectedToken) return challenge;

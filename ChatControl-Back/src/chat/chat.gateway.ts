@@ -23,6 +23,10 @@ export interface NewMessagePayload {
     text: string;
     timestamp: number;
     fromAi?: boolean;
+    type?: string;
+    mediaUrl?: string | null;
+    mimeType?: string | null;
+    fileName?: string | null;
   };
   companyId?: string;
 }
@@ -35,7 +39,7 @@ type SocketUserData = {
 };
 
 @WebSocketGateway({
-  cors: { origin: process.env.FRONTEND_URL || 'http://localhost:3000' },
+  cors: { origin: '*' },
   transports: ['websocket', 'polling'],
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -195,6 +199,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         text: message.text,
         timestamp: message.timestamp,
         fromAi: message.fromAi,
+        type: message.type,
+        mediaUrl: message.mediaUrl,
+        mimeType: message.mimeType,
+        fileName: message.fileName,
       },
       companyId: organizationId,
     };

@@ -44,6 +44,11 @@ export class WhatsAppController {
   async webhook(@Body() body: Record<string, unknown>, @Res() res: Response) {
     res.status(200).send('OK');
 
+    try {
+      const fs = require('fs');
+      fs.appendFileSync('webhook-debug.log', JSON.stringify({ timestamp: new Date().toISOString(), body }, null, 2) + '\n---\n');
+    } catch (e) {}
+
     const value = body as { object?: string; entry?: Array<Record<string, unknown>> };
     if (value.object !== 'whatsapp_business_account' || !Array.isArray(value.entry)) return;
 

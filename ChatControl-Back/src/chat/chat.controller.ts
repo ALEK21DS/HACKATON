@@ -7,7 +7,11 @@ import {
   Post,
   UseGuards,
   Query,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -101,6 +105,29 @@ export class ChatController {
       organizationId: user.organizationId!,
       conversationId: id,
       text: dto.text,
+      sentByUserId: user.userId,
+    });
+    return { ok: true, message: msg };
+  }
+
+  @Post('conversations/:id/send-media')
+  @UseInterceptors(FileInterceptor('file'))
+  async sendMedia(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @UploadedFile() file: any,
+    @Query('type') type: string,
+  ) {
+    if (!file) throw new BadRequestException('Archivo no proveído');
+    const validTypes = ['IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT'];
+    if (!validTypes.includes(type)) {
+      throw new BadRequestException('Tipo de mensaje inválido. Debe ser IMAGE, VIDEO, AUDIO o DOCUMENT');
+    }
+    const msg = await this.chat.sendMediaMessage({
+      organizationId: user.organizationId!,
+      conversationId: id,
+      file,
+      type: type as any,
       sentByUserId: user.userId,
     });
     return { ok: true, message: msg };

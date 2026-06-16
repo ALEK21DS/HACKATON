@@ -18,7 +18,7 @@ import {
 import { formatPhoneDisplay } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
 
-const WS_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const WS_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/api$/, '');
 
 // --- Icons ---
 function PersonIcon({ style }: { style?: React.CSSProperties }) {

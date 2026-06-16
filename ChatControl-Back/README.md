@@ -70,6 +70,31 @@ El servidor backend se levantará en [http://localhost:3001](http://localhost:30
 
 ---
 
+## 🌐 Pruebas Locales de Webhooks (WhatsApp/Meta) con Ngrok
+
+Dado que la API de Meta requiere una URL pública segura (HTTPS) para enviarnos los mensajes entrantes (webhooks) en desarrollo local, debes exponer tu servidor local usando un túnel como **Ngrok**.
+
+### 1. Iniciar el túnel
+Abre una nueva terminal en tu computadora y arranca el túnel apuntando al puerto del backend (`3001`):
+```bash
+npx ngrok http 3001
+```
+
+### 2. Configurar la URL en Meta Developers
+1. Ve al panel de **Meta Developers > WhatsApp > Configuración**.
+2. En la sección de Webhooks, haz clic en **Editar**.
+3. Configura la **URL de devolución de llamada** usando tu dirección HTTPS de Ngrok, incluyendo el prefijo global `/api` que utiliza el backend:
+   ```text
+   https://<TU-SUBDOMINIO>.ngrok-free.app/api/whatsapp/webhook
+   ```
+4. En **Token de verificación**, escribe el token configurado en tu `.env` (por defecto `definir-token-de-verificacion`).
+5. Haz clic en **Verificar y guardar**.
+
+### 3. Suscribirse al evento de mensajes (Crítico)
+En la lista de campos de Webhooks de Meta, busca el campo **`messages`** y haz clic en **Suscribirse** (el switch debe decir **"Suscrito"**). Sin esta suscripción activa, Meta no reenviará los chats ni los archivos multimedia a tu servidor local.
+
+---
+
 ## 🐳 Uso con Docker
 
 Si prefieres levantar todo el ecosistema (PostgreSQL + Backend) usando contenedores:

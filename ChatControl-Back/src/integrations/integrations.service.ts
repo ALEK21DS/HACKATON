@@ -6,6 +6,7 @@ export interface IntegrationStatusDto {
   hasWhatsappToken: boolean;
   hasGeminiKey: boolean;
   whatsappPhoneNumberId: string | null;
+  hasWhatsappBusinessAccountId: boolean;
 }
 
 export interface UpdateIntegrationsDto {
@@ -38,6 +39,7 @@ export class IntegrationsService {
       hasWhatsappToken: !!(c?.whatsappAccessTokenEnc && c.whatsappAccessTokenEnc.length > 0),
       hasGeminiKey: !!(c?.geminiApiKeyEnc && c.geminiApiKeyEnc.length > 0),
       whatsappPhoneNumberId: org.whatsappPhoneNumberId,
+      hasWhatsappBusinessAccountId: !!(c?.whatsappBusinessAccountIdEnc && c.whatsappBusinessAccountIdEnc.length > 0),
     };
   }
 

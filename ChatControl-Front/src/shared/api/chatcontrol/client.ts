@@ -113,6 +113,7 @@ export interface Conversation {
   id: string;
   phone: string;
   name?: string;
+  contactId?: string;
   /** Solo pruebas: número autorizado en Meta (sandbox). Si false, no se puede enviar en modo sandbox. */
   isSandboxAuthorized?: boolean;
   lastUserMessageAt: number | null;
@@ -489,6 +490,7 @@ export interface IntegrationStatus {
   hasWhatsappToken: boolean;
   hasGeminiKey: boolean;
   whatsappPhoneNumberId: string | null;
+  hasWhatsappBusinessAccountId: boolean;
 }
 
 export async function getIntegrationStatus(): Promise<IntegrationStatus> {
@@ -537,4 +539,27 @@ export async function resetOrgUserPassword(
     method: 'PATCH',
     body: JSON.stringify({ newPassword }),
   });
+}
+
+export async function sendMediaFile(
+  conversationId: string,
+  file: File,
+  type: 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT',
+): Promise<{ ok: boolean; message: Message }> {
+  const token = getToken();
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE}/chat/conversations/${conversationId}/send-media?type=${type}`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || res.statusText);
+  return data;
 }
