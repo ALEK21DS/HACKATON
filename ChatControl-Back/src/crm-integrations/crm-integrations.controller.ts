@@ -220,13 +220,15 @@ export class CrmIntegrationsController {
       return { ok: false, error: 'Firma HMAC inválida' };
     }
 
-    // Buscar usuario destino por email
     const userCheck = await this.service.checkUser(dto.userEmail);
     if (!userCheck.exists || !userCheck.user) {
       return { ok: false, error: `El usuario ${dto.userEmail} no existe en ChatControl` };
     }
 
-    const user = await this.prisma.user.findUnique({ where: { email: dto.userEmail.trim().toLowerCase() } });
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.userEmail.trim().toLowerCase() },
+      select: { id: true, organizationId: true },
+    });
     if (!user) {
       return { ok: false, error: `El usuario ${dto.userEmail} no existe en ChatControl` };
     }
