@@ -132,6 +132,15 @@ export default function ChatPage() {
       }
     });
 
+    socket.on('message_edited', (p: { conversationId: string; messageId: string; newText: string }) => {
+      if (p.conversationId === selectedIdRef.current) {
+        setMessages(prev => prev.map(m =>
+          m.id === p.messageId ? { ...m, text: p.newText, isEdited: true } : m
+        ));
+      }
+      loadConversations(false);
+    });
+
     socket.on('message_status', (p: MessageStatusPayload) => {
       if (p.conversationId === selectedIdRef.current) {
         setMessages(prev => prev.map(m =>
@@ -488,6 +497,7 @@ export default function ChatPage() {
                             <img src={m.mediaUrl} alt={m.fileName || ''} style={{ maxWidth: '280px', maxHeight: '280px', borderRadius: '12px', display: 'block' }} />
                           )}
                           {m.text && <div style={{ padding: showMedia ? '0.5rem 0.75rem 0.25rem' : '' }}>{m.text}</div>}
+                          {(m as any).isEdited && <div style={{ fontSize: '0.6rem', color: '#888', fontStyle: 'italic', marginTop: '0.2rem', padding: showMedia ? '0 0.75rem 0.25rem' : '' }}>✏️ Editado</div>}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.3rem' }}>
                           <span style={{ fontSize: '0.65rem', color: '#444', fontWeight: 700 }}>

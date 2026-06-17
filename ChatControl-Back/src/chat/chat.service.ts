@@ -112,40 +112,72 @@ export class ChatService {
       });
     }
 
-    await this.prisma.message.upsert({
+    // Detectar edición: buscar mensaje existente por wamid
+    const existingMessage = await this.prisma.message.findUnique({
       where: { whatsappMessageId: payload.messageId },
-      create: {
-        conversationId: conversation.id,
-        direction: MessageDirection.IN,
-        type: payload.type || MessageType.TEXT,
-        status: MessageStatus.RECEIVED,
-        body: payload.text,
-        mediaUrl: payload.mediaUrl,
-        mimeType: payload.mimeType,
-        fileName: payload.fileName,
-        whatsappMessageId: payload.messageId,
-        whatsappTimestamp: new Date(payload.timestamp),
-      },
-      update: {},
     });
 
-    if (isNewConversation && payload.type === MessageType.TEXT) {
-      await this.tryAutoDetectAndAssign(conversation.id, payload.organizationId, payload.text);
-    }
+    if (existingMessage) {
+      const bodyChanged = existingMessage.body !== payload.text;
+      if (bodyChanged) {
+        await this.prisma.messageEditHistory.create({
+          data: {
+            messageId: existingMessage.id,
+            previousBody: existingMessage.body,
+          },
+        });
+        await this.prisma.message.update({
+          where: { id: existingMessage.id },
+          data: {
+            body: payload.text,
+            isEdited: true,
+            editedAt: new Date(),
+            mediaUrl: payload.mediaUrl ?? existingMessage.mediaUrl,
+            mimeType: payload.mimeType ?? existingMessage.mimeType,
+            fileName: payload.fileName ?? existingMessage.fileName,
+          },
+        });
+        this.chatGateway.emitMessageEdited(
+          payload.organizationId,
+          conversation.id,
+          existingMessage.id,
+          payload.text,
+        );
+      }
+    } else {
+      await this.prisma.message.create({
+        data: {
+          conversationId: conversation.id,
+          direction: MessageDirection.IN,
+          type: payload.type || MessageType.TEXT,
+          status: MessageStatus.RECEIVED,
+          body: payload.text,
+          mediaUrl: payload.mediaUrl,
+          mimeType: payload.mimeType,
+          fileName: payload.fileName,
+          whatsappMessageId: payload.messageId,
+          whatsappTimestamp: new Date(payload.timestamp),
+        },
+      });
 
-    this.chatGateway.emitNewMessage(
-      payload.organizationId,
-      conversation.id,
-      {
-        id: payload.messageId,
-        conversationId: conversation.id,
-        fromUser: true,
-        text: payload.text,
-        timestamp: payload.timestamp,
-        mediaUrl: payload.mediaUrl,
-        mimeType: payload.mimeType,
-      } as any,
-    );
+      if (isNewConversation && payload.type === MessageType.TEXT) {
+        await this.tryAutoDetectAndAssign(conversation.id, payload.organizationId, payload.text);
+      }
+
+      this.chatGateway.emitNewMessage(
+        payload.organizationId,
+        conversation.id,
+        {
+          id: payload.messageId,
+          conversationId: conversation.id,
+          fromUser: true,
+          text: payload.text,
+          timestamp: payload.timestamp,
+          mediaUrl: payload.mediaUrl,
+          mimeType: payload.mimeType,
+        } as any,
+      );
+    }
   }
 
   private async tryAutoDetectAndAssign(
