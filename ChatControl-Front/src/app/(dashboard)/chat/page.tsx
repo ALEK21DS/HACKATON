@@ -13,9 +13,13 @@ import {
   markConversationAsRead,
   sendMessage,
   generateReply,
+  assignConversation,
+  sendMedia,
+  getOrgUsers,
   type Conversation,
   type Message,
   type NewMessagePayload,
+  type MessageStatusPayload,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
@@ -80,12 +84,19 @@ export default function ChatPage() {
   const [typingHint, setTypingHint] = useState('');
   const [canSend, setCanSend] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [orgUsers, setOrgUsers] = useState<Array<{ id: string; email: string; displayName: string | null; role: string }>>([]);
+  const [showAssignDropdown, setShowAssignDropdown] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [filePreview, setFilePreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   
   const socketRef = useRef<Socket | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   const myUserIdRef = useRef<string | null>(null);
+  const myUserRoleRef = useRef<string | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sendingRef = useRef(false);
 
   selectedIdRef.current = selectedId;
 
@@ -94,7 +105,13 @@ export default function ChatPage() {
   useEffect(() => {
     if (!mounted) return;
     if (!isLoggedIn()) { router.replace('/login'); return; }
-    getMe().then(m => { myUserIdRef.current = m.id; }).catch(() => {});
+    getMe().then(m => {
+      myUserIdRef.current = m.id;
+      myUserRoleRef.current = m.role;
+      if (m.role === 'ORG_ADMIN') {
+        getOrgUsers().then(u => setOrgUsers(u)).catch(() => {});
+      }
+    }).catch(() => {});
     loadConversations();
   }, [mounted, router]);
 
@@ -109,10 +126,23 @@ export default function ChatPage() {
       if (payload.conversationId === selectedIdRef.current) {
         setMessages(prev => {
           if (prev.some(m => m.id === payload.message.id)) return prev;
-          return [...prev, payload.message];
+          return [...prev, { ...payload.message, status: payload.message.status || 'RECEIVED' }];
         });
         markConversationAsRead(payload.conversationId);
       }
+    });
+
+    socket.on('message_status', (p: MessageStatusPayload) => {
+      if (p.conversationId === selectedIdRef.current) {
+        setMessages(prev => prev.map(m =>
+          m.id === p.messageId ? { ...m, status: p.status } : m
+        ));
+      }
+      loadConversations(false);
+    });
+
+    socket.on('conversation_assigned', (p: { conversationId: string; assignedToUserId: string }) => {
+      loadConversations(false);
     });
 
     socket.on('conversation_assigned_to_me', (p: { conversationId: string }) => {
@@ -171,19 +201,94 @@ export default function ChatPage() {
   }
 
   async function handleSend() {
-    if (!selectedId || !replyInput.trim() || sending || !canSend) return;
-    setSending(true);
+    if (!selectedId || !replyInput.trim() || sending || !canSend || sendingRef.current) return;
     const text = replyInput.trim();
     setReplyInput('');
+    setSending(true);
+    sendingRef.current = true;
+    const tempId = `temp_${Date.now()}`;
+    const optimistic: Message = {
+      id: tempId,
+      conversationId: selectedId,
+      fromUser: false,
+      text,
+      timestamp: Date.now(),
+      status: 'SENDING',
+    };
+    setMessages(prev => [...prev, optimistic]);
     try {
       await sendMessage(selectedId, text);
-      const msgRes = await getMessages(selectedId);
-      setMessages(msgRes.messages);
     } catch (err) {
+      setMessages(prev => prev.filter(m => m.id !== tempId));
       setReplyInput(text);
     } finally {
       setSending(false);
+      sendingRef.current = false;
     }
+  }
+
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const maxSize = 16 * 1024 * 1024;
+    if (file.size > maxSize) {
+      alert('Archivo muy grande. Máximo 16MB.');
+      e.target.value = '';
+      return;
+    }
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'application/pdf'];
+    if (!allowedTypes.includes(file.type)) {
+      alert('Formato no permitido. Usa: JPG, PNG, WEBP, GIF, MP4 o PDF.');
+      e.target.value = '';
+      return;
+    }
+    setSelectedFile(file);
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setFilePreview(ev.target?.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setFilePreview(null);
+    }
+  }
+
+  async function handleSendFile() {
+    if (!selectedId || !selectedFile || uploading || !canSend) return;
+    setUploading(true);
+    try {
+      await sendMedia(selectedId, selectedFile);
+    } catch (err: any) {
+      alert(err.message || 'Error al enviar archivo');
+    } finally {
+      setUploading(false);
+      setSelectedFile(null);
+      setFilePreview(null);
+    }
+  }
+
+  function clearFileSelection() {
+    setSelectedFile(null);
+    setFilePreview(null);
+  }
+
+  async function handleAssign(userId: string | null) {
+    if (!selectedId) return;
+    try {
+      await assignConversation(selectedId, userId);
+      setShowAssignDropdown(false);
+      loadConversations(false);
+    } catch (err) {}
+  }
+
+  const userRole = myUserRoleRef.current;
+
+  function renderStatus(status?: string) {
+    if (!status || status === 'SENDING') return <span style={{ fontSize: '0.6rem', color: '#888' }}>⏳</span>;
+    if (status === 'SENT') return <span style={{ fontSize: '0.6rem', color: '#888' }}>✓</span>;
+    if (status === 'DELIVERED') return <span style={{ fontSize: '0.6rem', color: '#888' }}>✓✓</span>;
+    if (status === 'READ') return <span style={{ fontSize: '0.6rem', color: '#60A5FA' }}>✓✓</span>;
+    if (status === 'FAILED') return <span style={{ fontSize: '0.6rem', color: '#EF4444' }}>✗</span>;
+    return null;
   }
 
   async function handleGenerateReply() {
@@ -315,9 +420,33 @@ export default function ChatPage() {
                   </div>
                 </div>
               </div>
-              <button style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', color: '#8C8C8C', padding: '0.6rem 1.2rem', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}>
-                VER DETALLES
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', position: 'relative' }}>
+                {userRole === 'ORG_ADMIN' && (
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      onClick={() => setShowAssignDropdown(!showAssignDropdown)}
+                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', color: '#8C8C8C', padding: '0.6rem 1.2rem', borderRadius: '10px', fontSize: '0.65rem', fontWeight: 700, cursor: 'pointer', textTransform: 'uppercase' }}
+                    >
+                      {selectedConv?.assignedToUserId ? 'Reasignar' : 'Asignar'}
+                    </button>
+                    {showAssignDropdown && (
+                      <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: '0.5rem', background: '#0D0D0D', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', minWidth: '250px', maxHeight: '300px', overflowY: 'auto', zIndex: 100, boxShadow: '0 20px 60px rgba(0,0,0,0.8)' }}>
+                        <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: '0.65rem', fontWeight: 800, color: '#444', textTransform: 'uppercase' }}>Asignar a:</div>
+                        <button onClick={() => handleAssign(null)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'none', border: 'none', color: '#666', fontSize: '0.85rem', cursor: 'pointer', textAlign: 'left', display: 'block' }}>
+                          Sin asignar
+                        </button>
+                        {orgUsers.map(u => (
+                          <button key={u.id} onClick={() => handleAssign(u.id)} style={{ width: '100%', padding: '0.75rem 1rem', background: selectedConv?.assignedToUserId === u.id ? 'rgba(239,68,68,0.08)' : 'none', border: 'none', color: '#F2F2F2', fontSize: '0.85rem', cursor: 'pointer', textAlign: 'left', display: 'block' }}>
+                            <span style={{ fontWeight: 700 }}>{u.displayName || u.email}</span>
+                            {selectedConv?.assignedToUserId === u.id && <span style={{ color: '#EF4444', marginLeft: '0.5rem', fontSize: '0.65rem' }}>✓</span>}
+                          </button>
+                        ))}
+                        {orgUsers.length === 0 && <div style={{ padding: '1rem', color: '#444', fontSize: '0.75rem', textAlign: 'center' }}>No hay usuarios disponibles</div>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </header>
 
             {/* Mensajes */}
@@ -341,23 +470,31 @@ export default function ChatPage() {
                   
                   {messages.map((m) => {
                     const isAgent = !m.fromUser;
+                    const showMedia = m.mediaUrl && m.type !== 'TEXT';
                     return (
                       <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAgent ? 'flex-end' : 'flex-start', maxWidth: '75%', alignSelf: isAgent ? 'flex-end' : 'flex-start' }}>
                         <div style={{ 
-                          padding: '1rem 1.25rem', 
+                          padding: showMedia ? '0.5rem' : '1rem 1.25rem',
                           borderRadius: isAgent ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
                           background: isAgent ? 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)' : '#1A1A1A',
                           color: 'white',
                           fontSize: '0.95rem',
                           lineHeight: '1.5',
                           boxShadow: isAgent ? '0 10px 25px rgba(239, 68, 68, 0.15)' : 'none',
-                          border: isAgent ? 'none' : '1px solid rgba(255,255,255,0.05)'
+                          border: isAgent ? 'none' : '1px solid rgba(255,255,255,0.05)',
+                          overflow: 'hidden',
                         }}>
-                          {m.text}
+                          {showMedia && m.mediaUrl && m.type === 'IMAGE' && (
+                            <img src={m.mediaUrl} alt={m.fileName || ''} style={{ maxWidth: '280px', maxHeight: '280px', borderRadius: '12px', display: 'block' }} />
+                          )}
+                          {m.text && <div style={{ padding: showMedia ? '0.5rem 0.75rem 0.25rem' : '' }}>{m.text}</div>}
                         </div>
-                        <span style={{ fontSize: '0.65rem', color: '#444', marginTop: '0.4rem', fontWeight: 700 }}>
-                          {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.3rem' }}>
+                          <span style={{ fontSize: '0.65rem', color: '#444', fontWeight: 700 }}>
+                            {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          {isAgent && renderStatus(m.status)}
+                        </div>
                       </div>
                     );
                   })}
@@ -373,10 +510,22 @@ export default function ChatPage() {
 
             {/* Footer de Entrada */}
             <footer style={{ padding: '1.5rem 2rem', background: '#040404' }}>
+              {filePreview && (
+                <div style={{ marginBottom: '0.75rem', padding: '0.75rem', background: '#0D0D0D', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <img src={filePreview} alt="Preview" style={{ width: '60px', height: '60px', borderRadius: '10px', objectFit: 'cover' }} />
+                  <span style={{ flex: 1, fontSize: '0.8rem', color: '#8C8C8C' }}>{selectedFile?.name}</span>
+                  <button onClick={clearFileSelection} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '8px', color: '#8C8C8C', padding: '0.4rem 0.8rem', cursor: 'pointer', fontSize: '0.7rem' }}>Cancelar</button>
+                  <button onClick={handleSendFile} disabled={uploading} style={{ background: '#EF4444', border: 'none', borderRadius: '10px', color: 'white', padding: '0.5rem 1.2rem', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    {uploading ? <Spinner size={12} /> : null}
+                    {uploading ? 'Subiendo...' : 'Enviar'}
+                  </button>
+                </div>
+              )}
               <div style={{ background: '#0D0D0D', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '20px', padding: '0.5rem', display: 'flex', alignItems: 'flex-end', gap: '0.5rem', boxShadow: '0 -10px 40px rgba(0,0,0,0.5)' }}>
-                <button style={{ padding: '0.75rem', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }} title="Adjuntar">
+                <label style={{ padding: '0.75rem', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }} title="Adjuntar">
                   <GalleryIcon />
-                </button>
+                  <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,application/pdf" onChange={handleFileSelect} style={{ display: 'none' }} />
+                </label>
                 <textarea 
                   value={replyInput}
                   onChange={(e) => setReplyInput(e.target.value)}

@@ -7,7 +7,11 @@ import {
   Post,
   UseGuards,
   Query,
+  UploadedFile,
+  UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -16,6 +20,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth.types';
 import { OrgMemberGuard } from '../auth/org-member.guard';
 import { ChatService } from './chat.service';
+import { StorageService } from '../common/storage.service';
 import { IsNotEmpty, IsString, IsOptional } from 'class-validator';
 
 class SendMessageDto {
@@ -34,7 +39,10 @@ class AssignConversationDto {
 @UseGuards(JwtAuthGuard, OrgMemberGuard, RolesGuard)
 @Roles(UserRole.ORG_ADMIN, UserRole.AGENT)
 export class ChatController {
-  constructor(private readonly chat: ChatService) {}
+  constructor(
+    private readonly chat: ChatService,
+    private readonly storage: StorageService,
+  ) {}
 
   @Get('conversations')
   async getConversations(@CurrentUser() user: AuthUser) {
@@ -101,6 +109,34 @@ export class ChatController {
       organizationId: user.organizationId!,
       conversationId: id,
       text: dto.text,
+      sentByUserId: user.userId,
+    });
+    return { ok: true, message: msg };
+  }
+
+  @Post('conversations/:id/send-media')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 16 * 1024 * 1024 } }))
+  async sendMedia(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @UploadedFile() file: any,
+  ) {
+    if (!file) throw new BadRequestException('Archivo requerido');
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm', 'audio/mpeg', 'audio/ogg', 'audio/wav', 'application/pdf'];
+    if (!allowedMimes.includes(file.mimetype)) {
+      throw new BadRequestException(`Formato no permitido: ${file.mimetype}`);
+    }
+    const ext = file.originalname.split('.').pop() || 'bin';
+    const path = `chats/${user.organizationId}/${Date.now()}_${id}.${ext}`;
+    const mediaUrl = await this.storage.uploadFile('chat-media', path, file.buffer, file.mimetype);
+    if (!mediaUrl) throw new BadRequestException('Error al subir archivo a Supabase');
+
+    const msg = await this.chat.sendMedia({
+      organizationId: user.organizationId!,
+      conversationId: id,
+      mediaUrl,
+      mimeType: file.mimetype,
+      fileName: file.originalname,
       sentByUserId: user.userId,
     });
     return { ok: true, message: msg };

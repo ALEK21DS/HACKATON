@@ -135,6 +135,7 @@ export interface Message {
   mediaUrl?: string | null;
   mimeType?: string | null;
   fileName?: string | null;
+  status?: string;
 }
 
 /** Payload del evento WebSocket new_message (emitido por el backend al guardar un mensaje) */
@@ -142,6 +143,12 @@ export interface NewMessagePayload {
   conversationId: string;
   message: Message;
   companyId?: string;
+}
+
+export interface MessageStatusPayload {
+  conversationId: string;
+  messageId: string;
+  status: string;
 }
 
 export async function getConversations(): Promise<Conversation[]> {
@@ -189,6 +196,35 @@ export async function sendMessage(
     method: 'POST',
     body: JSON.stringify({ text }),
   });
+}
+
+export async function assignConversation(
+  conversationId: string,
+  assignToUserId: string | null,
+): Promise<{ ok: boolean }> {
+  return api(`/chat/conversations/${conversationId}/assign`, {
+    method: 'POST',
+    body: JSON.stringify({ assignToUserId }),
+  });
+}
+
+export async function sendMedia(
+  conversationId: string,
+  file: File,
+): Promise<{ ok: boolean; message: Message }> {
+  const token = getToken();
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${BASE}/chat/conversations/${conversationId}/send-media`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: 'Error al enviar archivo' }));
+    throw new Error(err.message || err.error?.message || 'Error al enviar archivo');
+  }
+  return res.json();
 }
 
 export async function generateReply(
