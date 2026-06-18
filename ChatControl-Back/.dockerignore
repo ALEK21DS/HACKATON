@@ -8,3 +8,4 @@ dist
 .gitignore
 .env
 .env.docker
+pnpm-workspace.yaml
