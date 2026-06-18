@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'ChatControl - Chat profesional',
+  title: 'NextLine - Chat profesional',
   description: 'Sistema de chat con WhatsApp e IA',
   icons: {
     icon: '/assets/images/NOIRLINE2.png',
