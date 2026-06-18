@@ -20,6 +20,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth.types';
 import { OrgMemberGuard } from '../auth/org-member.guard';
 import { ChatService } from './chat.service';
+import { StorageService } from '../common/storage.service';
 import { IsNotEmpty, IsString, IsOptional } from 'class-validator';
 
 class SendMessageDto {
@@ -38,7 +39,10 @@ class AssignConversationDto {
 @UseGuards(JwtAuthGuard, OrgMemberGuard, RolesGuard)
 @Roles(UserRole.ORG_ADMIN, UserRole.AGENT)
 export class ChatController {
-  constructor(private readonly chat: ChatService) {}
+  constructor(
+    private readonly chat: ChatService,
+    private readonly storage: StorageService,
+  ) {}
 
   @Get('conversations')
   async getConversations(@CurrentUser() user: AuthUser) {
@@ -111,7 +115,7 @@ export class ChatController {
   }
 
   @Post('conversations/:id/send-media')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 16 * 1024 * 1024 } }))
   async sendMedia(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

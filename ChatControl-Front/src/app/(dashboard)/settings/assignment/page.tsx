@@ -7,6 +7,7 @@ import {
   isLoggedIn,
   getMe,
   getOrgUsers,
+  updateLeadDetectionConfig,
 } from '@/lib/api';
 
 type AgentInTurn = {
@@ -137,10 +138,19 @@ export default function AssignmentPage() {
 
   const handleSave = async () => {
     setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
+    try {
+      const agentIds = assignedAgents.map(a => a.id);
+      const nextAgentId = assignedAgents.find(a => a.isNext)?.id || null;
+      await updateLeadDetectionConfig({
+        enabled: isEnabled,
+        autoMessage: JSON.stringify({ agentIds, nextAgentId }),
+      });
       alert('Configuración guardada con éxito.');
-    }, 1000);
+    } catch (err: any) {
+      alert('Error al guardar: ' + (err.message || 'Error de red'));
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Logic for Modal List

@@ -133,17 +133,13 @@ export class CrmIntegrationsService implements OnModuleInit {
   }
 
   async verifyApiKey(apiKey: string): Promise<{ organizationId: string; crmUrl: string | null } | null> {
-    const integrations = await this.prisma.crmIntegration.findMany({
-      where: { isActive: true },
+    const apiKeyHash = createHmac('sha256', this.hmacSecret).update(apiKey).digest('hex');
+    const integration = await this.prisma.crmIntegration.findFirst({
+      where: { apiKeyHash, isActive: true },
+      select: { organizationId: true, crmUrl: true },
     });
-    for (const integration of integrations) {
-      if (!integration.apiKeyHash) continue;
-      const hash = createHmac('sha256', this.hmacSecret).update(apiKey).digest('hex');
-      if (hash === integration.apiKeyHash) {
-        return { organizationId: integration.organizationId, crmUrl: integration.crmUrl };
-      }
-    }
-    return null;
+    if (!integration) return null;
+    return { organizationId: integration.organizationId, crmUrl: integration.crmUrl };
   }
 
   async checkUser(
@@ -179,8 +175,32 @@ export class CrmIntegrationsService implements OnModuleInit {
     }
 
     const result: SyncResultDto = { created: 0, updated: 0, rejected: 0, errors: [] };
+    const UPSERT_BATCH_SIZE = 50;
 
-    // Obtener o crear la lista
+    type PreparedContact = SyncContactDto & { phone: string; crmLeadId: string };
+
+    const prepared: PreparedContact[] = [];
+    for (const contact of contacts) {
+      const phone = contact.phone.replace(/\D/g, '');
+      if (!phone) {
+        result.rejected++;
+        result.errors.push({
+          externalId: contact.externalId,
+          error: 'Teléfono inválido',
+        });
+        continue;
+      }
+      prepared.push({
+        ...contact,
+        phone,
+        crmLeadId: contact.externalId || phone,
+      });
+    }
+
+    if (!prepared.length) {
+      throw new BadRequestException('Ningún contacto tiene un teléfono válido');
+    }
+
     let list = await this.prisma.broadcastList.findUnique({
       where: { organizationId_name: { organizationId, name: listName } },
     });
@@ -197,127 +217,153 @@ export class CrmIntegrationsService implements OnModuleInit {
       });
     }
 
-    for (const contact of contacts) {
-      const phone = contact.phone.replace(/\D/g, '');
-      if (!phone) {
+    const phones = [...new Set(prepared.map((c) => c.phone))];
+    const existingContacts = await this.prisma.contact.findMany({
+      where: { organizationId, phone: { in: phones } },
+      select: { id: true, phone: true },
+    });
+    const existingByPhone = new Map(existingContacts.map((c) => [c.phone, c]));
+
+    const contactsToCreate = phones
+      .filter((phone) => !existingByPhone.has(phone))
+      .map((phone) => {
+        const item = prepared.find((c) => c.phone === phone)!;
+        return {
+          organizationId,
+          phone,
+          name: item.name?.trim() || null,
+        };
+      });
+
+    if (contactsToCreate.length) {
+      await this.prisma.contact.createMany({
+        data: contactsToCreate,
+        skipDuplicates: true,
+      });
+    }
+
+    const allContacts = await this.prisma.contact.findMany({
+      where: { organizationId, phone: { in: phones } },
+      select: { id: true, phone: true },
+    });
+    const contactByPhone = new Map(allContacts.map((c) => [c.phone, c]));
+
+    for (const item of prepared) {
+      if (!contactByPhone.has(item.phone)) {
         result.rejected++;
-        result.errors.push({ externalId: contact.externalId, error: 'Teléfono inválido' });
-        continue;
-      }
-
-      try {
-        // Upsert contacto en la tabla Contact
-        const dbContact = await this.prisma.contact.upsert({
-          where: { organizationId_phone: { organizationId, phone } },
-          create: {
-            organizationId,
-            phone,
-            name: contact.name?.trim() || null,
-          },
-          update: {
-            name: contact.name?.trim() || undefined,
-          },
+        result.errors.push({
+          externalId: item.externalId,
+          error: 'No se pudo crear o recuperar el contacto',
         });
-
-        // Asegurar que existe una conversación
-        const existingConv = await this.prisma.conversation.findFirst({
-          where: { contactId: dbContact.id },
-        });
-        if (!existingConv) {
-          await this.prisma.conversation.create({
-            data: { contactId: dbContact.id },
-          });
-        }
-
-        // Agregar a la lista (evitar duplicados en la misma lista)
-        await this.prisma.broadcastListContact.upsert({
-          where: { listId_contactId: { listId: list.id, contactId: dbContact.id } },
-          create: {
-            listId: list.id,
-            contactId: dbContact.id,
-            externalId: contact.externalId,
-            campaign: contact.campaign,
-            seller: contact.seller,
-            source: contact.source || 'crm',
-          },
-          update: {
-            externalId: contact.externalId,
-            campaign: contact.campaign,
-            seller: contact.seller,
-          },
-        });
-
-        // Crear/actualizar vínculo de trazabilidad CRM → ChatControl
-        await this.prisma.crmContactLink.upsert({
-          where: { organizationId_crmLeadId: { organizationId, crmLeadId: contact.externalId || contact.phone } },
-          create: {
-            organizationId,
-            crmLeadId: contact.externalId || contact.phone,
-            chatcontrolContactId: dbContact.id,
-            phone,
-            listId: list.id,
-            assignedToUserId,
-            externalData: {
-              campaign: contact.campaign,
-              seller: contact.seller,
-              source: contact.source || 'crm',
-              name: contact.name,
-              email: contact.email,
-            },
-          },
-          update: {
-            chatcontrolContactId: dbContact.id,
-            phone,
-            listId: list.id,
-            assignedToUserId,
-            externalData: {
-              campaign: contact.campaign,
-              seller: contact.seller,
-              source: contact.source || 'crm',
-              name: contact.name,
-              email: contact.email,
-            },
-          },
-        });
-
-        const wasCreated = existingConv ? false : true;
-        if (wasCreated) result.created++;
-        else result.updated++;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Error desconocido';
-        result.rejected++;
-        result.errors.push({ externalId: contact.externalId, error: msg });
       }
     }
 
-    // Actualizar contador de la lista
-    const count = await this.prisma.broadcastListContact.count({
-      where: { listId: list.id },
+    const validItems = prepared.filter((item) => contactByPhone.has(item.phone));
+    result.created = validItems.filter((item) => !existingByPhone.has(item.phone)).length;
+    result.updated = validItems.filter((item) => existingByPhone.has(item.phone)).length;
+
+    const contactIds = validItems.map((item) => contactByPhone.get(item.phone)!.id);
+    const existingConversations = await this.prisma.conversation.findMany({
+      where: { contactId: { in: contactIds } },
+      select: { contactId: true },
     });
+    const contactsWithConversation = new Set(existingConversations.map((c) => c.contactId));
+    const conversationsToCreate = contactIds
+      .filter((contactId) => !contactsWithConversation.has(contactId))
+      .map((contactId) => ({ contactId }));
+
+    if (conversationsToCreate.length) {
+      await this.prisma.conversation.createMany({
+        data: conversationsToCreate,
+      });
+    }
+
+    for (let i = 0; i < validItems.length; i += UPSERT_BATCH_SIZE) {
+      const chunk = validItems.slice(i, i + UPSERT_BATCH_SIZE);
+      await this.prisma.$transaction(
+        chunk.flatMap((item) => {
+          const dbContact = contactByPhone.get(item.phone)!;
+          const externalData = {
+            campaign: item.campaign,
+            seller: item.seller,
+            source: item.source || 'crm',
+            name: item.name,
+            email: item.email,
+          };
+
+          return [
+            this.prisma.broadcastListContact.upsert({
+              where: {
+                listId_contactId: { listId: list.id, contactId: dbContact.id },
+              },
+              create: {
+                listId: list.id,
+                contactId: dbContact.id,
+                externalId: item.externalId,
+                campaign: item.campaign,
+                seller: item.seller,
+                source: item.source || 'crm',
+              },
+              update: {
+                externalId: item.externalId,
+                campaign: item.campaign,
+                seller: item.seller,
+              },
+            }),
+            this.prisma.crmContactLink.upsert({
+              where: {
+                organizationId_crmLeadId: {
+                  organizationId,
+                  crmLeadId: item.crmLeadId,
+                },
+              },
+              create: {
+                organizationId,
+                crmLeadId: item.crmLeadId,
+                chatcontrolContactId: dbContact.id,
+                phone: item.phone,
+                listId: list.id,
+                assignedToUserId,
+                externalData,
+              },
+              update: {
+                chatcontrolContactId: dbContact.id,
+                phone: item.phone,
+                listId: list.id,
+                assignedToUserId,
+                externalData,
+              },
+            }),
+          ];
+        }),
+      );
+    }
+
+    const [count] = await Promise.all([
+      this.prisma.broadcastListContact.count({ where: { listId: list.id } }),
+      this.prisma.crmAuditLog.create({
+        data: {
+          organizationId,
+          action: 'contacts_exported',
+          crmUser,
+          crmName,
+          contactsTotal: contacts.length,
+          contactsCreated: result.created,
+          contactsUpdated: result.updated,
+          contactsRejected: result.rejected,
+          listName,
+          details: {
+            errors: result.errors,
+            assignedToUserId,
+            listId: list.id,
+          },
+        },
+      }),
+    ]);
+
     await this.prisma.broadcastList.update({
       where: { id: list.id },
       data: { contactCount: count },
-    });
-
-    // Registrar auditoría
-    await this.prisma.crmAuditLog.create({
-      data: {
-        organizationId,
-        action: 'contacts_exported',
-        crmUser,
-        crmName,
-        contactsTotal: contacts.length,
-        contactsCreated: result.created,
-        contactsUpdated: result.updated,
-        contactsRejected: result.rejected,
-        listName,
-        details: {
-          errors: result.errors,
-          assignedToUserId,
-          listId: list.id,
-          contactsInList: count,
-        },
-      },
     });
 
     return { ...result, listId: list.id };

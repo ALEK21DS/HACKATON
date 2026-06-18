@@ -177,6 +177,51 @@ export class WhatsAppService {
     return out;
   }
 
+  async sendMediaMessage(
+    organizationId: string,
+    to: string,
+    mediaUrl: string,
+    mimeType: string,
+    caption?: string,
+  ): Promise<{ messageId: string }> {
+    const { accessToken, phoneNumberId } = await this.resolveCredentials(organizationId);
+    const normalized = to.replace(/\D/g, '');
+    if (!normalized) throw new BadRequestException('Número de destino inválido');
+
+    const mediaType = mimeType.startsWith('image/') ? 'image'
+      : mimeType.startsWith('video/') ? 'video'
+      : mimeType.startsWith('audio/') ? 'audio'
+      : 'document';
+
+    const body: Record<string, unknown> = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: normalized,
+      type: mediaType,
+      [mediaType]: { link: mediaUrl },
+    };
+    if (caption && (mediaType === 'image' || mediaType === 'video')) {
+      (body[mediaType] as Record<string, unknown>).caption = caption;
+    }
+
+    const url = `${this.baseUrl}/${phoneNumberId}/messages`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json()) as { error?: { message: string }; messages?: Array<{ id: string }> };
+    if (data.error) {
+      throw new BadRequestException(data.error.message || 'Error al enviar multimedia por WhatsApp');
+    }
+    const messageId = data.messages?.[0]?.id;
+    if (!messageId) throw new BadRequestException('WhatsApp no devolvió ID de mensaje');
+    return { messageId };
+  }
+
   async sendTemplateMessage(
     organizationId: string,
     to: string,

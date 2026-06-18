@@ -14,7 +14,8 @@ import { Response } from 'express';
 import { WhatsAppService } from './whatsapp.service';
 import { ChatService } from '../chat/chat.service';
 import { StorageService } from '../common/storage.service';
-import { MessageType } from '@prisma/client';
+import { MessageType, MessageStatus } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Controller('whatsapp')
 export class WhatsAppController {
@@ -23,6 +24,7 @@ export class WhatsAppController {
   constructor(
     private readonly whatsapp: WhatsAppService,
     private readonly storage: StorageService,
+    private readonly prisma: PrismaService,
     @Inject(forwardRef(() => ChatService)) private readonly chat: ChatService,
   ) {}
 
@@ -69,10 +71,16 @@ export class WhatsAppController {
                 type: string;
                 text?: { body: string };
               }>;
+              statuses?: Array<{
+                id: string;
+                status: string;
+                timestamp: string;
+                recipient_id: string;
+              }>;
               metadata?: { phone_number_id?: string };
             }
           | undefined;
-        if (!val?.messages) continue;
+        if (!val) continue;
         const phoneNumberId = val.metadata?.phone_number_id;
         const organizationId =
           await this.whatsapp.resolveOrganizationIdFromWebhookPhoneNumberId(phoneNumberId);
@@ -80,6 +88,36 @@ export class WhatsAppController {
           this.logger.warn(`Webhook sin organización para phone_number_id=${phoneNumberId}`);
           continue;
         }
+
+        // Procesar actualizaciones de estado (sent, delivered, read)
+        if (val.statuses?.length) {
+          for (const st of val.statuses) {
+            try {
+              const msg = await this.prisma.message.findFirst({
+                where: { whatsappMessageId: st.id },
+              });
+              if (msg) {
+                const newStatus = this.mapWhatsappStatus(st.status);
+                if (newStatus) {
+                  await this.prisma.message.update({
+                    where: { id: msg.id },
+                    data: { status: newStatus },
+                  });
+                  this.chat.emitMessageStatusUpdate(
+                    organizationId,
+                    msg.conversationId,
+                    msg.id,
+                    newStatus,
+                  );
+                }
+              }
+            } catch (err) {
+              this.logger.error(`Error actualizando estado de mensaje ${st.id}:`, err);
+            }
+          }
+        }
+
+        if (!val.messages) continue;
         const contactsList = val.contacts || [];
         for (const msg of val.messages) {
           const pushName = contactsList.find(c => c.wa_id === msg.from)?.profile?.name;
@@ -115,7 +153,7 @@ export class WhatsAppController {
                     contactName: pushName,
                     messageId: msg.id,
                     timestamp: parseInt(msg.timestamp, 10) * 1000,
-                    text: '', // Mensajes de medios no tienen texto por defecto, a menos que tengan caption.
+                    text: '',
                     type: dbType,
                     mediaUrl,
                     mimeType: downloaded.mimeType,
@@ -131,6 +169,16 @@ export class WhatsAppController {
           }
         }
       }
+    }
+  }
+
+  private mapWhatsappStatus(status: string): MessageStatus | null {
+    switch (status) {
+      case 'sent': return MessageStatus.SENT;
+      case 'delivered': return MessageStatus.DELIVERED;
+      case 'read': return MessageStatus.READ;
+      case 'failed': return MessageStatus.FAILED;
+      default: return null;
     }
   }
 }

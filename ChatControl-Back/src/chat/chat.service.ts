@@ -22,6 +22,7 @@ export interface Message {
   mediaUrl?: string | null;
   mimeType?: string | null;
   fileName?: string | null;
+  status?: string;
 }
 
 export interface Conversation {
@@ -114,42 +115,74 @@ export class ChatService {
       });
     }
 
-    await this.prisma.message.upsert({
+    // Detectar edición: buscar mensaje existente por wamid
+    const existingMessage = await this.prisma.message.findUnique({
       where: { whatsappMessageId: payload.messageId },
-      create: {
-        conversationId: conversation.id,
-        direction: MessageDirection.IN,
-        type: payload.type || MessageType.TEXT,
-        status: MessageStatus.RECEIVED,
-        body: payload.text,
-        mediaUrl: payload.mediaUrl,
-        mimeType: payload.mimeType,
-        fileName: payload.fileName,
-        whatsappMessageId: payload.messageId,
-        whatsappTimestamp: new Date(payload.timestamp),
-      },
-      update: {},
     });
 
-    if (isNewConversation && payload.type === MessageType.TEXT) {
-      await this.tryAutoDetectAndAssign(conversation.id, payload.organizationId, payload.text);
-    }
+    if (existingMessage) {
+      const bodyChanged = existingMessage.body !== payload.text;
+      if (bodyChanged) {
+        await this.prisma.messageEditHistory.create({
+          data: {
+            messageId: existingMessage.id,
+            previousBody: existingMessage.body,
+          },
+        });
+        await this.prisma.message.update({
+          where: { id: existingMessage.id },
+          data: {
+            body: payload.text,
+            isEdited: true,
+            editedAt: new Date(),
+            mediaUrl: payload.mediaUrl ?? existingMessage.mediaUrl,
+            mimeType: payload.mimeType ?? existingMessage.mimeType,
+            fileName: payload.fileName ?? existingMessage.fileName,
+          },
+        });
+        this.chatGateway.emitMessageEdited(
+          payload.organizationId,
+          conversation.id,
+          existingMessage.id,
+          payload.text,
+        );
+      }
+    } else {
+      await this.prisma.message.create({
+        data: {
+          conversationId: conversation.id,
+          direction: MessageDirection.IN,
+          type: payload.type || MessageType.TEXT,
+          status: MessageStatus.RECEIVED,
+          body: payload.text,
+          mediaUrl: payload.mediaUrl,
+          mimeType: payload.mimeType,
+          fileName: payload.fileName,
+          whatsappMessageId: payload.messageId,
+          whatsappTimestamp: new Date(payload.timestamp),
+        },
+      });
 
-    this.chatGateway.emitNewMessage(
-      payload.organizationId,
-      conversation.id,
-      {
-        id: payload.messageId,
-        conversationId: conversation.id,
-        fromUser: true,
-        text: payload.text,
-        timestamp: payload.timestamp,
-        mediaUrl: payload.mediaUrl,
-        mimeType: payload.mimeType,
-        fileName: payload.fileName,
-        type: payload.type || MessageType.TEXT,
-      } as any,
-    );
+      if (isNewConversation && payload.type === MessageType.TEXT) {
+        await this.tryAutoDetectAndAssign(conversation.id, payload.organizationId, payload.text);
+      }
+
+      this.chatGateway.emitNewMessage(
+        payload.organizationId,
+        conversation.id,
+        {
+          id: payload.messageId,
+          conversationId: conversation.id,
+          fromUser: true,
+          text: payload.text,
+          timestamp: payload.timestamp,
+          mediaUrl: payload.mediaUrl,
+          mimeType: payload.mimeType,
+          fileName: payload.fileName,
+          type: payload.type || MessageType.TEXT,
+        } as any,
+      );
+    }
   }
 
   private async tryAutoDetectAndAssign(
@@ -345,6 +378,7 @@ export class ChatService {
       mediaUrl: m.mediaUrl,
       mimeType: m.mimeType,
       fileName: m.fileName,
+      status: m.status,
     }));
 
     return { messages, nextCursor };
@@ -512,10 +546,76 @@ export class ChatService {
       text: created.body,
       timestamp: created.whatsappTimestamp.getTime(),
       fromAi: created.fromAi ?? undefined,
+      status: created.status,
+    };
+    this.chatGateway.emitNewMessage(params.organizationId, params.conversationId, msg);
+    return msg;
+  }
+
+  async sendMedia(params: {
+    organizationId: string;
+    conversationId: string;
+    mediaUrl: string;
+    mimeType: string;
+    fileName?: string;
+    sentByUserId?: string | null;
+  }): Promise<Message> {
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id: params.conversationId, contact: { organizationId: params.organizationId } },
+      include: { contact: true },
+    });
+    if (!conv) throw new BadRequestException('Conversación no encontrada');
+
+    const isSandbox = this.config.get<string>('WHATSAPP_SANDBOX', 'true') === 'true';
+    if (isSandbox && !conv.contact.isSandboxAuthorized) {
+      throw new ForbiddenException(
+        'Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.',
+      );
+    }
+    await this.settings.checkDailyLimitOrThrow(params.conversationId, params.organizationId);
+    const lastUserMessageAt = conv.lastUserMessageAt ? new Date(conv.lastUserMessageAt) : null;
+
+    const msgType = params.mimeType.startsWith('image/') ? MessageType.IMAGE
+      : params.mimeType.startsWith('video/') ? MessageType.VIDEO
+      : params.mimeType.startsWith('audio/') ? MessageType.AUDIO
+      : MessageType.DOCUMENT;
+
+    const { messageId } = await this.whatsapp.sendMediaMessage(
+      params.organizationId,
+      conv.contact.phone,
+      params.mediaUrl,
+      params.mimeType,
+      params.fileName,
+    );
+
+    const now = new Date();
+    const created = await this.prisma.message.create({
+      data: {
+        conversationId: params.conversationId,
+        direction: MessageDirection.OUT,
+        type: msgType,
+        status: MessageStatus.SENT,
+        body: params.fileName || '',
+        mediaUrl: params.mediaUrl,
+        mimeType: params.mimeType,
+        fileName: params.fileName || null,
+        whatsappMessageId: messageId,
+        whatsappTimestamp: now,
+        fromAi: false,
+        sentByUserId: params.sentByUserId ?? null,
+      },
+    });
+    const msg: Message = {
+      id: created.id,
+      conversationId: created.conversationId,
+      fromUser: false,
+      text: created.body,
+      timestamp: created.whatsappTimestamp.getTime(),
       type: created.type,
       mediaUrl: created.mediaUrl,
       mimeType: created.mimeType,
       fileName: created.fileName,
+      status: created.status,
     };
     this.chatGateway.emitNewMessage(params.organizationId, params.conversationId, msg);
     return msg;
@@ -618,6 +718,10 @@ export class ChatService {
     return this.ai.generateReply(organizationId, context);
   }
 
+  emitMessageStatusUpdate(organizationId: string, conversationId: string, messageId: string, status: string): void {
+    this.chatGateway.emitMessageStatusUpdate(organizationId, conversationId, messageId, status);
+  }
+
   async assignConversation(
     conversationId: string,
     organizationId: string,
@@ -643,9 +747,11 @@ export class ChatService {
       },
     });
 
-    if (assignToUserId) {
-      this.chatGateway.emitConversationAssigned(organizationId, conversationId, assignToUserId);
-    }
+    this.chatGateway.emitConversationAssigned(
+      organizationId,
+      conversationId,
+      assignToUserId || '',
+    );
   }
 
   private async assertConversationAccess(

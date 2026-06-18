@@ -173,7 +173,7 @@ export class BroadcastService {
         continue;
       }
 
-      if (type === 'manual' || type === 'ia') {
+      if (type === 'manual' || type === 'ia' || (type === 'template' && !isMetaTemplate)) {
         if (!contact.canSend) {
           await this.logBroadcast(organizationId, userId, conversationId, type, 'failed', 'Fuera de ventana de 24 horas');
           this.gateway.emitBroadcastMessageFailed(organizationId, conversationId, i, 'Fuera de ventana de 24 horas');

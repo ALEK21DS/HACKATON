@@ -23,6 +23,7 @@ export interface NewMessagePayload {
     text: string;
     timestamp: number;
     fromAi?: boolean;
+    status?: string;
     type?: string;
     mediaUrl?: string | null;
     mimeType?: string | null;
@@ -199,6 +200,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         text: message.text,
         timestamp: message.timestamp,
         fromAi: message.fromAi,
+        status: message.status,
         type: message.type,
         mediaUrl: message.mediaUrl,
         mimeType: message.mimeType,
@@ -215,9 +217,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       conversationId,
       assignedToUserId,
     });
-    this.server.to(`user:${assignedToUserId}`).emit('conversation_assigned_to_me', {
-      conversationId,
-    });
+    if (assignedToUserId) {
+      this.server.to(`user:${assignedToUserId}`).emit('conversation_assigned_to_me', {
+        conversationId,
+      });
+    }
   }
 
   emitBroadcastStarted(organizationId: string, total: number): void {
@@ -227,6 +231,29 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   emitBroadcastMessageSent(organizationId: string, conversationId: string, index: number): void {
     this.server.to(`org:${organizationId}`).emit('broadcast_message_sent', { conversationId, index });
     this.server.to(`conversation:${conversationId}`).emit('broadcast_message_sent', { conversationId, index });
+  }
+
+  emitMessageEdited(organizationId: string, conversationId: string, messageId: string, newText: string): void {
+    const payload = {
+      conversationId,
+      messageId,
+      newText,
+    };
+    this.server.to(`org:${organizationId}`).emit('message_edited', payload);
+    this.server.to(`conversation:${conversationId}`).emit('message_edited', payload);
+  }
+
+  emitMessageStatusUpdate(organizationId: string, conversationId: string, messageId: string, status: string): void {
+    this.server.to(`org:${organizationId}`).emit('message_status', {
+      conversationId,
+      messageId,
+      status,
+    });
+    this.server.to(`conversation:${conversationId}`).emit('message_status', {
+      conversationId,
+      messageId,
+      status,
+    });
   }
 
   emitBroadcastMessageFailed(
