@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # install dependencies first for better caching
-RUN npm install -g pnpm
+RUN npm install -g pnpm@9
 COPY package.json pnpm-lock.yaml* ./
 RUN pnpm install --frozen-lockfile
 
