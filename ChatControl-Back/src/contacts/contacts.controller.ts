@@ -18,12 +18,12 @@ export class ContactsController {
 
   @Get()
   async findAll(@CurrentUser() user: AuthUser) {
-    return this.contacts.findAll(user.organizationId!);
+    return this.contacts.findAll(user.organizationId!, user.userId, user.role);
   }
 
   @Get(':id')
   async findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    const contact = await this.contacts.findOne(user.organizationId!, id);
+    const contact = await this.contacts.findOne(user.organizationId!, id, user.userId, user.role);
     if (!contact) return { ok: false, contact: null };
     return { ok: true, contact };
   }
@@ -45,5 +45,19 @@ export class ContactsController {
       isSandboxAuthorized: dto.isSandboxAuthorized,
     });
     return { ok: true, contact };
+  }
+
+  @Post('export')
+  async exportContacts(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { contactIds: string[] },
+  ) {
+    const rows = await this.contacts.exportContacts(
+      user.organizationId!,
+      body.contactIds,
+      user.userId,
+      user.role,
+    );
+    return { ok: true, rows };
   }
 }

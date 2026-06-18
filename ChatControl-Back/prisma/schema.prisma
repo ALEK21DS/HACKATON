@@ -23,6 +23,7 @@ model Organization {
   crmIntegration        CrmIntegration?
   broadcastLists        BroadcastList[]
   crmContactLinks       CrmContactLink[]
+  campaigns             Campaign[]
 }
 
 /// Credenciales sensibles cifradas (AES-256-GCM). Solo el backend descifra.
@@ -188,6 +189,7 @@ model PlatformAuditLog {
 model Contact {
   id                  String         @id @default(cuid())
   phone               String
+  email               String?
   createdAt           DateTime       @default(now())
   isSandboxAuthorized Boolean        @default(false)
   name                String?
@@ -330,3 +332,18 @@ enum MessageStatus {
   READ
   FAILED
 }
+
+model Campaign {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @default(now()) @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([isActive])
+}
+

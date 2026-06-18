@@ -7,6 +7,7 @@ import {
   isLoggedIn,
   getMe,
   getOrgUsers,
+  getLeadDetectionConfig,
   updateLeadDetectionConfig,
 } from '@/lib/api';
 
@@ -94,8 +95,45 @@ export default function AssignmentPage() {
         if (me.role !== 'ORG_ADMIN') { router.replace('/settings'); return; }
         const users = await getOrgUsers();
         setAllOrgUsers(users);
-        setAssignedAgents([]); 
+
+        // Cargar configuración de asignación del backend
+        const leadConfig = await getLeadDetectionConfig();
+        setIsEnabled(leadConfig.enabled);
+
+        if (leadConfig.autoMessage) {
+          try {
+            const parsed = JSON.parse(leadConfig.autoMessage);
+            const agentIds: string[] = parsed.agentIds || [];
+            const nextAgentId: string | null = parsed.nextAgentId || null;
+
+            const mappedAgents: AgentInTurn[] = agentIds
+              .map(id => {
+                const u = users.find((user: any) => user.id === id);
+                if (!u) return null;
+                return {
+                  id: u.id,
+                  email: u.email,
+                  displayName: u.displayName,
+                  isNext: u.id === nextAgentId,
+                };
+              })
+              .filter((a): a is AgentInTurn => a !== null);
+
+            // Si hay agentes asignados pero ninguno marcado como isNext, marcar el primero
+            if (mappedAgents.length > 0 && !mappedAgents.some(a => a.isNext)) {
+              mappedAgents[0].isNext = true;
+            }
+
+            setAssignedAgents(mappedAgents);
+          } catch (e) {
+            console.error('Error parsing lead config autoMessage', e);
+            setAssignedAgents([]);
+          }
+        } else {
+          setAssignedAgents([]);
+        }
       } catch (err) {
+        console.error('Error fetching assignment config', err);
       } finally {
         setLoading(false);
       }
@@ -136,8 +174,13 @@ export default function AssignmentPage() {
     setAssignedAgents(prev => prev.map(a => ({ ...a, isNext: a.id === id })));
   };
 
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
   const handleSave = async () => {
     setSaving(true);
+    setSuccessMessage('');
+    setErrorMessage('');
     try {
       const agentIds = assignedAgents.map(a => a.id);
       const nextAgentId = assignedAgents.find(a => a.isNext)?.id || null;
@@ -145,9 +188,10 @@ export default function AssignmentPage() {
         enabled: isEnabled,
         autoMessage: JSON.stringify({ agentIds, nextAgentId }),
       });
-      alert('Configuración guardada con éxito.');
+      setSuccessMessage('Configuración guardada con éxito.');
+      setTimeout(() => setSuccessMessage(''), 4000);
     } catch (err: any) {
-      alert('Error al guardar: ' + (err.message || 'Error de red'));
+      setErrorMessage('Error al guardar: ' + (err.message || 'Error de red'));
     } finally {
       setSaving(false);
     }
@@ -175,6 +219,17 @@ export default function AssignmentPage() {
           Configura la equidad de atención al cliente para tu equipo comercial.
         </p>
       </header>
+
+      {successMessage && (
+        <div style={{ padding: '1rem', background: 'rgba(74, 222, 128, 0.1)', border: '1px solid rgba(74, 222, 128, 0.2)', borderRadius: 12, color: '#4ADE80', marginBottom: '1.5rem', fontSize: '0.85rem' }}>
+          {successMessage}
+        </div>
+      )}
+      {errorMessage && (
+        <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: 12, color: '#EF4444', marginBottom: '1.5rem', fontSize: '0.85rem' }}>
+          {errorMessage}
+        </div>
+      )}
 
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '8rem 0', gap: '1.5rem' }}>

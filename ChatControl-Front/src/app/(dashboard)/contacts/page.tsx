@@ -3,10 +3,8 @@
 import { useEffect, useState } from 'react';
 import { Spinner } from '@/shared/ui/spinner';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 import {
   isLoggedIn,
-  getMe,
   getContactsList,
   createContact,
   updateContact,
@@ -46,6 +44,7 @@ export default function ContactsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [isSandboxAuthorized, setIsSandboxAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -73,10 +72,12 @@ export default function ContactsPage() {
     if (selectedContact) {
       setName(selectedContact.name ?? '');
       setPhone(selectedContact.phone);
+      setEmail(selectedContact.email ?? '');
       setIsSandboxAuthorized(selectedContact.isSandboxAuthorized);
     } else {
       setName('');
       setPhone('');
+      setEmail('');
       setIsSandboxAuthorized(false);
     }
   }, [selectedId, selectedContact]);
@@ -85,6 +86,7 @@ export default function ContactsPage() {
     setSelectedId(null);
     setName('');
     setPhone('');
+    setEmail('');
     setIsSandboxAuthorized(false);
     setError('');
   };
@@ -97,9 +99,9 @@ export default function ContactsPage() {
     setError('');
     try {
       if (selectedId) {
-        await updateContact(selectedId, { name: name.trim() || undefined, isSandboxAuthorized });
+        await updateContact(selectedId, { name: name.trim() || undefined, email: email.trim() || undefined, isSandboxAuthorized });
       } else {
-        const { contact } = await createContact({ phone: phoneNorm, name: name.trim() || undefined, isSandboxAuthorized });
+        const { contact } = await createContact({ phone: phoneNorm, name: name.trim() || undefined, email: email.trim() || undefined, isSandboxAuthorized });
         setSelectedId(contact.id);
       }
       const list = await getContactsList();
@@ -111,7 +113,7 @@ export default function ContactsPage() {
     }
   };
 
-  const filteredContacts = contacts.filter(c => 
+  const filteredContacts = contacts.filter(c =>
     c.phone.includes(searchQuery) || (c.name?.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
@@ -119,7 +121,7 @@ export default function ContactsPage() {
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100vh', background: '#040404', color: '#F2F2F2', overflow: 'hidden' }}>
-      
+
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
 
@@ -134,15 +136,15 @@ export default function ContactsPage() {
           </div>
           <div style={{ position: 'relative', marginBottom: '1rem' }}>
             <SearchIcon style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#444' }} />
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder="Buscar contacto..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', padding: '0.75rem 1rem 0.75rem 2.8rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
             />
           </div>
-          <button 
+          <button
             onClick={handleNew}
             style={{ width: '100%', padding: '0.75rem', background: 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)', border: 'none', borderRadius: '12px', color: 'white', fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '0 8px 15px rgba(239, 68, 68, 0.2)' }}
           >
@@ -162,17 +164,17 @@ export default function ContactsPage() {
               <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.2em' }}>Sincronizando</span>
             </div>
           ) : filteredContacts.map(c => (
-            <button 
+            <button
               key={c.id}
               onClick={() => setSelectedId(c.id)}
-              style={{ 
-                width: '100%', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '1rem', 
-                padding: '1rem', 
-                borderRadius: '16px', 
-                border: 'none', 
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '1rem',
+                padding: '1rem',
+                borderRadius: '16px',
+                border: 'none',
                 background: selectedId === c.id ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
@@ -199,12 +201,11 @@ export default function ContactsPage() {
 
       {/* ── Main: Gestión de Perfil ── */}
       <main className="page-main custom-scrollbar">
-        
         <div style={{ width: '100%', margin: '0' }}>
           <header style={{ marginBottom: '3rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <button 
-                onClick={() => setSidebarOpen(true)} 
+              <button
+                onClick={() => setSidebarOpen(true)}
                 className="mob-sidebar-btn"
                 aria-label="Abrir lista de contactos"
               >
@@ -222,11 +223,11 @@ export default function ContactsPage() {
           </header>
 
           <form onSubmit={handleSubmit} style={{ background: '#080808', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '24px', padding: '2.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Nombre Completo</label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Nombre del contacto (opcional)"
@@ -235,9 +236,20 @@ export default function ContactsPage() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Correo Electrónico (Opcional)</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="correo@ejemplo.com"
+                style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1rem', color: 'white', outline: 'none', fontSize: '1rem' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Número WhatsApp</label>
-              <input 
-                type="tel" 
+              <input
+                type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="Ej: 593981234567"
@@ -252,9 +264,9 @@ export default function ContactsPage() {
                 <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#EF4444', display: 'block', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Autorización Sandbox</span>
                 <p style={{ margin: 0, fontSize: '0.75rem', color: '#666', lineHeight: '1.4' }}>Permitir envío de mensajes en modo pruebas de Meta Developers.</p>
               </div>
-              <div 
+              <div
                 onClick={() => setIsSandboxAuthorized(!isSandboxAuthorized)}
-                style={{ 
+                style={{
                   width: '54px', height: '28px', borderRadius: '14px', background: isSandboxAuthorized ? '#EF4444' : '#1A1A1A', position: 'relative', cursor: 'pointer', transition: 'all 0.3s ease',
                   boxShadow: isSandboxAuthorized ? '0 0 15px rgba(239, 68, 68, 0.3)' : 'none'
                 }}
@@ -265,8 +277,8 @@ export default function ContactsPage() {
 
             {error && <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', borderRadius: '12px', fontSize: '0.85rem', textAlign: 'center', fontWeight: 700 }}>{error}</div>}
 
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               disabled={saving || !phone.trim()}
               style={{ width: '100%', padding: '1.25rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '14px', color: 'white', fontWeight: 900, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.15em', cursor: 'pointer', transition: 'all 0.3s ease', boxShadow: '0 10px 30px rgba(239, 68, 68, 0.3)', marginTop: '1rem', opacity: (saving || !phone.trim()) ? 0.5 : 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
             >

@@ -142,7 +142,28 @@ export default function BroadcastPage() {
     }
   }, [contactSource, selectedListIds, refreshListPreview]);
 
+  // Limpiar selección de contactos inactivos si se cambia a un mensaje que no es plantilla
+  useEffect(() => {
+    if (messageType !== 'template') {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        let changed = false;
+        contacts.forEach(c => {
+          if (!c.canSend && next.has(c.id)) {
+            next.delete(c.id);
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }
+  }, [messageType, contacts]);
+
   const toggleContact = (id: string) => {
+    const contact = contacts.find(c => c.id === id);
+    const isBlocked = messageType !== 'template' && contact && !contact.canSend;
+    if (isBlocked) return;
+
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -152,8 +173,22 @@ export default function BroadcastPage() {
   };
 
   const toggleAll = () => {
-    if (selectedIds.size === contacts.length) setSelectedIds(new Set());
-    else setSelectedIds(new Set(contacts.map(c => c.id)));
+    const allowedContacts = contacts.filter(c => messageType === 'template' || c.canSend);
+    const allAllowedSelected = allowedContacts.every(c => selectedIds.has(c.id));
+
+    if (allAllowedSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        allowedContacts.forEach(c => next.delete(c.id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        allowedContacts.forEach(c => next.add(c.id));
+        return next;
+      });
+    }
   };
 
   const handleGenerateMessage = async () => {
@@ -352,44 +387,55 @@ export default function BroadcastPage() {
             <div style={{ padding: '2rem', textAlign: 'center', color: '#22c55e', fontSize: '0.9rem', fontWeight: 700 }}>
               Segmento completo: {selectedIds.size} contactos
             </div>
-          ) : filteredContacts.map(c => (
-            <div 
-              key={c.id}
-              onClick={() => toggleContact(c.id)}
-              style={{ 
-                width: '100%', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '1rem', 
-                padding: '1rem', 
-                borderRadius: '16px', 
-                background: selectedIds.has(c.id) ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                marginBottom: '0.25rem',
-                border: selectedIds.has(c.id) ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid transparent'
-              }}
-            >
-              <div style={{ 
-                width: '18px', height: '18px', borderRadius: '5px', 
-                border: '2px solid',
-                borderColor: selectedIds.has(c.id) ? '#EF4444' : '#333',
-                background: selectedIds.has(c.id) ? '#EF4444' : 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s'
-              }}>
-                {selectedIds.has(c.id) && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
+          ) : filteredContacts.map(c => {
+            const isBlocked = messageType !== 'template' && !c.canSend;
+            const isSelected = selectedIds.has(c.id);
+
+            return (
+              <div 
+                key={c.id}
+                onClick={() => !isBlocked && toggleContact(c.id)}
+                style={{ 
+                  width: '100%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '1rem', 
+                  padding: '1rem', 
+                  borderRadius: '16px', 
+                  background: isSelected ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
+                  cursor: isBlocked ? 'not-allowed' : 'pointer',
+                  opacity: isBlocked ? 0.35 : 1,
+                  transition: 'all 0.2s ease',
+                  marginBottom: '0.25rem',
+                  border: isSelected ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid transparent'
+                }}
+              >
+                <div style={{ 
+                  width: '18px', height: '18px', borderRadius: '5px', 
+                  border: '2px solid',
+                  borderColor: isBlocked ? '#222' : isSelected ? '#EF4444' : '#333',
+                  background: isBlocked ? 'transparent' : isSelected ? '#EF4444' : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s'
+                }}>
+                  {!isBlocked && isSelected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
+                </div>
+                <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
+                  <PersonIcon style={{ width: '1rem', height: '1rem' }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#F2F2F2', display: 'block' }}>{c.name || formatPhoneDisplay(c.phone)}</span>
+                  <span style={{ fontSize: '0.7rem', color: c.canSend ? '#666' : '#EF4444', fontWeight: 600 }}>
+                    {c.canSend 
+                      ? `Ventana: ${Math.floor(c.windowSecondsRemaining / 3600)}h restantes` 
+                      : isBlocked 
+                        ? 'Fuera de ventana (Solo Plantilla)' 
+                        : 'Fuera de ventana'
+                    }
+                  </span>
+                </div>
               </div>
-              <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
-                <PersonIcon style={{ width: '1rem', height: '1rem' }} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#F2F2F2', display: 'block' }}>{c.name || formatPhoneDisplay(c.phone)}</span>
-                <span style={{ fontSize: '0.7rem', color: c.canSend ? '#666' : '#EF4444', fontWeight: 600 }}>
-                  {c.canSend ? `Ventana: ${Math.floor(c.windowSecondsRemaining / 3600)}h restantes` : 'Fuera de ventana'}
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </aside>
 

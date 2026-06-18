@@ -63,10 +63,10 @@ function SendIcon({ style }: { style?: React.CSSProperties }) {
   );
 }
 
-function GalleryIcon({ style }: { style?: React.CSSProperties }) {
+function PaperclipIcon({ style }: { style?: React.CSSProperties }) {
   return (
     <svg style={{ width: '1.1rem', height: '1.1rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
     </svg>
   );
 }
@@ -91,6 +91,7 @@ export default function ChatPage() {
   // New details, lightbox and attachment states
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
   const [editSandbox, setEditSandbox] = useState(false);
   const [updatingContact, setUpdatingContact] = useState(false);
   const [gallery, setGallery] = useState<Message[]>([]);
@@ -241,7 +242,10 @@ export default function ChatPage() {
     };
     setMessages(prev => [...prev, optimistic]);
     try {
-      await sendMessage(selectedId, text);
+      const res = await sendMessage(selectedId, text);
+      if (res && res.message) {
+        setMessages(prev => prev.map(m => m.id === tempId ? res.message : m));
+      }
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== tempId));
       setReplyInput(text);
@@ -260,9 +264,14 @@ export default function ChatPage() {
       e.target.value = '';
       return;
     }
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'application/pdf'];
-    if (!allowedTypes.includes(file.type)) {
-      alert('Formato no permitido. Usa: JPG, PNG, WEBP, GIF, MP4 o PDF.');
+    const allowedTypes = [
+      'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+      'video/mp4', 'video/webm',
+      'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/mp4',
+      'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ];
+    if (!allowedTypes.includes(file.type) && !file.name.endsWith('.pdf') && !file.name.endsWith('.docx') && !file.name.endsWith('.doc')) {
+      alert('Formato no permitido. Usa: JPG, PNG, WEBP, GIF, MP4, PDF o DOCX.');
       e.target.value = '';
       return;
     }
@@ -279,14 +288,26 @@ export default function ChatPage() {
   async function handleSendFile() {
     if (!selectedId || !selectedFile || uploading || !canSend) return;
     setUploading(true);
+    
+    let type: 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' = 'DOCUMENT';
+    if (selectedFile.type.startsWith('image/')) {
+      type = 'IMAGE';
+    } else if (selectedFile.type.startsWith('video/')) {
+      type = 'VIDEO';
+    } else if (selectedFile.type.startsWith('audio/')) {
+      type = 'AUDIO';
+    }
+
     try {
-      await sendMedia(selectedId, selectedFile);
+      await sendMediaFile(selectedId, selectedFile, type);
+      const msgRes = await getMessages(selectedId);
+      setMessages(msgRes.messages);
+      setSelectedFile(null);
+      setFilePreview(null);
     } catch (err: any) {
       alert(err.message || 'Error al enviar archivo');
     } finally {
       setUploading(false);
-      setSelectedFile(null);
-      setFilePreview(null);
     }
   }
 
@@ -307,7 +328,7 @@ export default function ChatPage() {
   const userRole = myUserRoleRef.current;
 
   function renderStatus(status?: string) {
-    if (!status || status === 'SENDING') return <span style={{ fontSize: '0.6rem', color: '#888' }}>⏳</span>;
+    if (!status || status === 'SENDING') return null;
     if (status === 'SENT') return <span style={{ fontSize: '0.6rem', color: '#888' }}>✓</span>;
     if (status === 'DELIVERED') return <span style={{ fontSize: '0.6rem', color: '#888' }}>✓✓</span>;
     if (status === 'READ') return <span style={{ fontSize: '0.6rem', color: '#60A5FA' }}>✓✓</span>;
@@ -335,6 +356,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (selectedConv) {
       setEditName(selectedConv.name || '');
+      setEditEmail(selectedConv.email || '');
       setEditSandbox(selectedConv.isSandboxAuthorized || false);
     }
     if (selectedId && detailsOpen) {
@@ -353,6 +375,7 @@ export default function ChatPage() {
     try {
       await updateContact(selectedConv.contactId, {
         name: editName.trim() || undefined,
+        email: editEmail.trim() || undefined,
         isSandboxAuthorized: editSandbox,
       });
       await loadConversations(false);
@@ -363,31 +386,7 @@ export default function ChatPage() {
     }
   }
 
-  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !selectedId) return;
 
-    let type: 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' = 'DOCUMENT';
-    if (file.type.startsWith('image/')) {
-      type = 'IMAGE';
-    } else if (file.type.startsWith('video/')) {
-      type = 'VIDEO';
-    } else if (file.type.startsWith('audio/')) {
-      type = 'AUDIO';
-    }
-
-    setSending(true);
-    try {
-      await sendMediaFile(selectedId, file, type);
-      const msgRes = await getMessages(selectedId);
-      setMessages(msgRes.messages);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error al enviar archivo');
-    } finally {
-      setSending(false);
-      if (e.target) e.target.value = '';
-    }
-  }
 
   if (!mounted) return null;
 
@@ -663,6 +662,14 @@ export default function ChatPage() {
                           {(m as any).isEdited && <div style={{ fontSize: '0.6rem', color: '#888', fontStyle: 'italic', marginTop: '0.2rem' }}>✏️ Editado</div>}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.3rem' }}>
+                          {isAgent && m.status === 'SENDING' && (
+                            <span className={styles.rotateSpinner} style={{ display: 'inline-flex', marginRight: '0.15rem' }}>
+                              <svg style={{ width: '0.65rem', height: '0.65rem', color: '#888' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4">
+                                <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" />
+                                <path style={{ opacity: 0.85 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                              </svg>
+                            </span>
+                          )}
                           <span style={{ fontSize: '0.65rem', color: '#444', fontWeight: 700 }}>
                             {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
@@ -683,10 +690,18 @@ export default function ChatPage() {
 
             {/* Footer de Entrada */}
             <footer style={{ padding: '1.5rem 2rem', background: '#040404' }}>
-              {filePreview && (
+              {selectedFile && (
                 <div style={{ marginBottom: '0.75rem', padding: '0.75rem', background: '#0D0D0D', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <img src={filePreview} alt="Preview" style={{ width: '60px', height: '60px', borderRadius: '10px', objectFit: 'cover' }} />
-                  <span style={{ flex: 1, fontSize: '0.8rem', color: '#8C8C8C' }}>{selectedFile?.name}</span>
+                  {filePreview ? (
+                    <img src={filePreview} alt="Preview" style={{ width: '60px', height: '60px', borderRadius: '10px', objectFit: 'cover' }} />
+                  ) : (
+                    <div style={{ width: '60px', height: '60px', borderRadius: '10px', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#EF4444' }}>
+                      <svg style={{ width: '1.8rem', height: '1.8rem' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                      </svg>
+                    </div>
+                  )}
+                  <span style={{ flex: 1, fontSize: '0.8rem', color: '#8C8C8C', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedFile.name}</span>
                   <button onClick={clearFileSelection} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '8px', color: '#8C8C8C', padding: '0.4rem 0.8rem', cursor: 'pointer', fontSize: '0.7rem' }}>Cancelar</button>
                   <button onClick={handleSendFile} disabled={uploading} style={{ background: '#EF4444', border: 'none', borderRadius: '10px', color: 'white', padding: '0.5rem 1.2rem', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     {uploading ? <Spinner size={12} /> : null}
@@ -701,7 +716,7 @@ export default function ChatPage() {
                   title="Adjuntar"
                   disabled={!canSend}
                 >
-                  <GalleryIcon />
+                  <PaperclipIcon />
                 </button>
                 <input 
                   type="file" 
@@ -796,9 +811,14 @@ export default function ChatPage() {
               <h4 style={{ margin: '0 0 0.25rem 0', fontSize: '1.1rem', fontWeight: 800 }}>
                 {selectedConv.name || 'Sin Nombre'}
               </h4>
-              <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 600 }}>
+              <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 600, display: 'block', marginBottom: '0.1rem' }}>
                 {formatPhoneDisplay(selectedConv.phone)}
               </span>
+              {selectedConv.email && (
+                <span style={{ fontSize: '0.75rem', color: '#8C8C8C', fontWeight: 500, display: 'block' }}>
+                  {selectedConv.email}
+                </span>
+              )}
             </div>
           </div>
 
@@ -813,6 +833,19 @@ export default function ChatPage() {
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 placeholder="Nombre del contacto"
+                style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', padding: '0.75rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Email
+              </label>
+              <input 
+                type="email" 
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                placeholder="Email del contacto"
                 style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', padding: '0.75rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
               />
             </div>

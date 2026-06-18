@@ -42,9 +42,15 @@ export class BroadcastService {
     private readonly config: ConfigService,
   ) {}
 
-  async getContacts(organizationId: string): Promise<BroadcastContact[]> {
+  async getContacts(organizationId: string, userId?: string, userRole?: string): Promise<BroadcastContact[]> {
+    const where: any = { organizationId };
+    if (userRole === 'AGENT' && userId) {
+      where.conversations = {
+        some: { assignedToUserId: userId }
+      };
+    }
     const allContacts = await this.prisma.contact.findMany({
-      where: { organizationId },
+      where,
       orderBy: { createdAt: 'desc' },
     });
     for (const contact of allContacts) {
@@ -57,7 +63,7 @@ export class BroadcastService {
         });
       }
     }
-    const list = await this.chat.getConversationsWithWindowStatus(organizationId);
+    const list = await this.chat.getConversationsWithWindowStatus(organizationId, userId, userRole);
     return list.map((c) => ({
       id: c.id,
       phone: c.phone,

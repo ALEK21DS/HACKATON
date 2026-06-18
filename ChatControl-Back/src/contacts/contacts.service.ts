@@ -5,6 +5,7 @@ export interface ContactDto {
   id: string;
   phone: string;
   name: string | null;
+  email: string | null;
   isSandboxAuthorized: boolean;
   createdAt: number;
 }
@@ -15,17 +16,24 @@ function normalizePhone(phone: string): string {
 
 @Injectable()
 export class ContactsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
-  async findAll(organizationId: string): Promise<ContactDto[]> {
+  async findAll(organizationId: string, userId?: string, userRole?: string): Promise<ContactDto[]> {
+    const where: any = { organizationId };
+    if (userRole === 'AGENT' && userId) {
+      where.conversations = {
+        some: { assignedToUserId: userId }
+      };
+    }
     const list = await this.prisma.contact.findMany({
-      where: { organizationId },
+      where,
       orderBy: { createdAt: 'desc' },
     });
     return list.map((c) => ({
       id: c.id,
       phone: c.phone,
       name: c.name,
+      email: c.email,
       isSandboxAuthorized: c.isSandboxAuthorized,
       createdAt: c.createdAt.getTime(),
     }));
@@ -36,6 +44,7 @@ export class ContactsService {
     params: {
       phone: string;
       name?: string;
+      email?: string;
       isSandboxAuthorized?: boolean;
     },
   ): Promise<ContactDto> {
@@ -49,10 +58,12 @@ export class ContactsService {
         organizationId,
         phone,
         name: params.name?.trim() || null,
+        email: params.email?.trim() || null,
         isSandboxAuthorized: params.isSandboxAuthorized ?? false,
       },
       update: {
         name: params.name !== undefined ? params.name?.trim() || null : undefined,
+        email: params.email !== undefined ? params.email?.trim() || null : undefined,
         isSandboxAuthorized: params.isSandboxAuthorized ?? undefined,
       },
     });
@@ -68,6 +79,7 @@ export class ContactsService {
       id: contact.id,
       phone: contact.phone,
       name: contact.name,
+      email: contact.email,
       isSandboxAuthorized: contact.isSandboxAuthorized,
       createdAt: contact.createdAt.getTime(),
     };
@@ -76,7 +88,7 @@ export class ContactsService {
   async update(
     organizationId: string,
     id: string,
-    params: { name?: string; isSandboxAuthorized?: boolean },
+    params: { name?: string; email?: string; isSandboxAuthorized?: boolean },
   ): Promise<ContactDto> {
     const existing = await this.prisma.contact.findFirst({
       where: { id, organizationId },
@@ -86,6 +98,7 @@ export class ContactsService {
       where: { id },
       data: {
         name: params.name !== undefined ? params.name?.trim() || null : undefined,
+        email: params.email !== undefined ? params.email?.trim() || null : undefined,
         isSandboxAuthorized: params.isSandboxAuthorized ?? undefined,
       },
     });
@@ -93,22 +106,94 @@ export class ContactsService {
       id: contact.id,
       phone: contact.phone,
       name: contact.name,
+      email: contact.email,
       isSandboxAuthorized: contact.isSandboxAuthorized,
       createdAt: contact.createdAt.getTime(),
     };
   }
 
-  async findOne(organizationId: string, id: string): Promise<ContactDto | null> {
+  async findOne(organizationId: string, id: string, userId?: string, userRole?: string): Promise<ContactDto | null> {
+    const where: any = { id, organizationId };
+    if (userRole === 'AGENT' && userId) {
+      where.conversations = {
+        some: { assignedToUserId: userId }
+      };
+    }
     const contact = await this.prisma.contact.findFirst({
-      where: { id, organizationId },
+      where,
     });
     if (!contact) return null;
     return {
       id: contact.id,
       phone: contact.phone,
       name: contact.name,
+      email: contact.email,
       isSandboxAuthorized: contact.isSandboxAuthorized,
       createdAt: contact.createdAt.getTime(),
     };
+  }
+
+  async exportContacts(
+    organizationId: string,
+    contactIds: string[],
+    userId?: string,
+    userRole?: string,
+  ): Promise<Array<{
+    campaign_name: string;
+    form_name: string;
+    email: string;
+    name: string;
+    phone: string;
+    agent: string;
+  }>> {
+    // Get the active campaign for this org
+    const activeCampaign = await this.prisma.campaign.findFirst({
+      where: { organizationId, isActive: true },
+    });
+    const campaignName = activeCampaign?.name ?? 'Sin campaña';
+
+    // Build the where clause based on role
+    const where: any = { organizationId, id: { in: contactIds } };
+    if (userRole === 'AGENT' && userId) {
+      where.conversations = {
+        some: { assignedToUserId: userId },
+      };
+    }
+
+    const contacts = await this.prisma.contact.findMany({
+      where,
+      include: {
+        conversations: {
+          where: userRole === 'AGENT' && userId
+            ? { assignedToUserId: userId }
+            : {},
+          include: {
+            assignedToUser: {
+              select: { id: true, email: true, displayName: true },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return contacts.map((c) => {
+      const conversation = c.conversations[0];
+      const assignedUser = conversation?.assignedToUser;
+      const agentName = assignedUser
+        ? assignedUser.displayName || assignedUser.email
+        : 'Sin asignar';
+
+      return {
+        campaign_name: campaignName,
+        form_name: 'WSP KRAKE DEV',
+        email: c.email ?? '',
+        name: c.name ?? '',
+        phone: c.phone,
+        agent: agentName,
+      };
+    });
   }
 }

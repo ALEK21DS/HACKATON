@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, Matches, MinLength, IsEmail } from 'class-validator';
 
 export class CreateContactDto {
   @IsString()
@@ -9,6 +9,10 @@ export class CreateContactDto {
   @IsString()
   @IsOptional()
   name?: string;
+
+  @IsEmail({}, { message: 'Formato de correo electrónico inválido' })
+  @IsOptional()
+  email?: string;
 
   /** Solo pruebas: número autorizado en Meta (sandbox). TODO: eliminar en producción. */
   @IsBoolean()

@@ -29,6 +29,7 @@ export interface Conversation {
   id: string;
   phone: string;
   name?: string;
+  email?: string | null;
   contactId?: string;
   isSandboxAuthorized?: boolean;
   lastUserMessageAt: number | null;
@@ -257,10 +258,7 @@ export class ChatService {
     const where: any = { contact: { organizationId } };
 
     if (userRole === 'AGENT' && userId) {
-      where.OR = [
-        { assignedToUserId: userId },
-        { assignedToUserId: null },
-      ];
+      where.assignedToUserId = userId;
     }
 
     const list = await this.prisma.conversation.findMany({
@@ -289,6 +287,7 @@ export class ChatService {
           id: c.id,
           phone: c.contact.phone,
           name: c.contact.name ?? undefined,
+          email: c.contact.email ?? undefined,
           contactId: c.contact.id,
           isSandboxAuthorized: c.contact.isSandboxAuthorized,
           lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
@@ -452,7 +451,7 @@ export class ChatService {
     });
     if (!c) return undefined;
 
-    if (userRole === 'AGENT' && userId && c.assignedToUserId && c.assignedToUserId !== userId) {
+    if (userRole === 'AGENT' && userId && c.assignedToUserId !== userId) {
       return undefined;
     }
 
@@ -469,6 +468,7 @@ export class ChatService {
       id: c.id,
       phone: c.contact.phone,
       name: c.contact.name ?? undefined,
+      email: c.contact.email ?? undefined,
       contactId: c.contact.id,
       isSandboxAuthorized: c.contact.isSandboxAuthorized,
       lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
@@ -766,7 +766,7 @@ export class ChatService {
     });
     if (!conv) throw new NotFoundException('Conversación no encontrada');
 
-    if (userRole === 'AGENT' && userId && conv.assignedToUserId && conv.assignedToUserId !== userId) {
+    if (userRole === 'AGENT' && userId && conv.assignedToUserId !== userId) {
       throw new ForbiddenException('No tienes acceso a esta conversación');
     }
   }

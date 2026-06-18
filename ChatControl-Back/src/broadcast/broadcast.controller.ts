@@ -18,7 +18,7 @@ export class BroadcastController {
 
   @Get('contacts')
   async getContacts(@CurrentUser() user: AuthUser) {
-    return this.broadcast.getContacts(user.organizationId!);
+    return this.broadcast.getContacts(user.organizationId!, user.userId, user.role);
   }
 
   @Get('templates')

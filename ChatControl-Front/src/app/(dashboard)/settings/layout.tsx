@@ -181,6 +181,17 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                     <span className={styles.navLabel}>Integración CRM</span>
                   </Link>
                 </li>
+                <li>
+                  <Link 
+                    href="/settings/campaigns" 
+                    className={isActive('/settings/campaigns') ? styles.navItemActive : styles.navItem}
+                  >
+                    <svg width="1.1rem" height="1.1rem" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: '0.2rem' }}>
+                      <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/>
+                    </svg>
+                    <span className={styles.navLabel}>Campañas</span>
+                  </Link>
+                </li>
               </>
             )}
           </ul>

@@ -113,6 +113,7 @@ export interface Conversation {
   id: string;
   phone: string;
   name?: string;
+  email?: string | null;
   contactId?: string;
   /** Solo pruebas: número autorizado en Meta (sandbox). Si false, no se puede enviar en modo sandbox. */
   isSandboxAuthorized?: boolean;
@@ -290,6 +291,7 @@ export interface ContactItem {
   id: string;
   phone: string;
   name: string | null;
+  email?: string | null;
   isSandboxAuthorized: boolean;
   createdAt: number;
 }
@@ -305,6 +307,7 @@ export async function getContact(id: string): Promise<{ ok: boolean; contact: Co
 export async function createContact(params: {
   phone: string;
   name?: string;
+  email?: string;
   isSandboxAuthorized?: boolean;
 }): Promise<{ ok: boolean; contact: ContactItem }> {
   return api('/contacts', {
@@ -315,7 +318,7 @@ export async function createContact(params: {
 
 export async function updateContact(
   id: string,
-  params: { name?: string; isSandboxAuthorized?: boolean },
+  params: { name?: string; email?: string; isSandboxAuthorized?: boolean },
 ): Promise<{ ok: boolean; contact: ContactItem }> {
   return api(`/contacts/${id}`, {
     method: 'PATCH',
@@ -714,3 +717,53 @@ export async function getBroadcastListContactIds(id: string): Promise<{
 export async function deleteBroadcastList(id: string): Promise<{ ok: boolean }> {
   return api(`/broadcast-lists/${id}`, { method: 'DELETE' });
 }
+
+export interface Campaign {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  createdAt: number | string;
+  updatedAt: number | string;
+}
+
+export async function getCampaigns(): Promise<Campaign[]> {
+  return api<Campaign[]>('/campaigns');
+}
+
+export async function createCampaign(body: { name: string; description?: string }): Promise<Campaign> {
+  return api<Campaign>('/campaigns', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function activateCampaign(id: string): Promise<Campaign> {
+  return api<Campaign>(`/campaigns/${id}/activate`, {
+    method: 'PATCH',
+  });
+}
+
+export async function deleteCampaign(id: string): Promise<void> {
+  await api(`/campaigns/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export interface ExportContactRow {
+  campaign_name: string;
+  form_name: string;
+  email: string;
+  name: string;
+  phone: string;
+  agent: string;
+}
+
+export async function exportContacts(contactIds: string[]): Promise<{ ok: boolean; rows: ExportContactRow[] }> {
+  return api('/contacts/export', {
+    method: 'POST',
+    body: JSON.stringify({ contactIds }),
+  });
+}
+
