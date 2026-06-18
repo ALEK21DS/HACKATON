@@ -21,6 +21,11 @@ COPY . .
 
 RUN pnpm run build
 
+# Copy and setup entrypoint script
+COPY docker-entrypoint.sh /usr/src/app/docker-entrypoint.sh
+RUN chmod +x /usr/src/app/docker-entrypoint.sh
+
 EXPOSE 3001
 
+ENTRYPOINT ["/usr/src/app/docker-entrypoint.sh"]
 CMD ["pnpm", "run", "start:prod"]
