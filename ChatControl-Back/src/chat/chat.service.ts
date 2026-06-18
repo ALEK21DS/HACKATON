@@ -580,7 +580,7 @@ export class ChatService {
       : params.mimeType.startsWith('audio/') ? MessageType.AUDIO
       : MessageType.DOCUMENT;
 
-    const { messageId } = await this.whatsapp.sendMediaMessage(
+    const { messageId } = await this.whatsapp.sendMediaRaw(
       params.organizationId,
       conv.contact.phone,
       params.mediaUrl,

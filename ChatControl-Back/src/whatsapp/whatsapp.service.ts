@@ -177,7 +177,7 @@ export class WhatsAppService {
     return out;
   }
 
-  async sendMediaMessage(
+  async sendMediaRaw(
     organizationId: string,
     to: string,
     mediaUrl: string,

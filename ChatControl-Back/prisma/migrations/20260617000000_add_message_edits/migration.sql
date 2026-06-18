@@ -1,4 +1,4 @@
-﻿-- AlterTable: add isEdited + editedAt to Message
+-- AlterTable: add isEdited + editedAt to Message
 ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "isEdited" BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "editedAt" TIMESTAMPTZ;
 
