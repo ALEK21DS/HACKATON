@@ -70,6 +70,7 @@ export interface MeResponse {
   role: UserRole;
   organizationId: string | null;
   organizationName: string | null;
+  isSandbox?: boolean;
 }
 
 // Auth: email + contraseña (usuarios en BD)

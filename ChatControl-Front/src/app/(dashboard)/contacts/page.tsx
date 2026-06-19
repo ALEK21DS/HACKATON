@@ -8,6 +8,7 @@ import {
   getContactsList,
   createContact,
   updateContact,
+  getMe,
   type ContactItem,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
@@ -46,6 +47,7 @@ export default function ContactsPage() {
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [isSandboxAuthorized, setIsSandboxAuthorized] = useState(false);
+  const [isSandbox, setIsSandbox] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -60,8 +62,14 @@ export default function ContactsPage() {
     (async () => {
       setLoading(true);
       try {
-        const list = await getContactsList();
+        const [list, me] = await Promise.all([
+          getContactsList(),
+          getMe().catch(() => null)
+        ]);
         setContacts(list);
+        if (me && me.isSandbox !== undefined) {
+          setIsSandbox(me.isSandbox);
+        }
       } catch (err) {} finally { setLoading(false); }
     })();
   }, [mounted, router]);
@@ -189,7 +197,7 @@ export default function ContactsPage() {
                 <span style={{ fontWeight: 700, fontSize: '0.95rem', color: selectedId === c.id ? 'white' : '#F2F2F2', display: 'block' }}>{c.name || formatPhoneDisplay(c.phone)}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <span style={{ fontSize: '0.75rem', color: '#666' }}>{formatPhoneDisplay(c.phone)}</span>
-                  {c.isSandboxAuthorized && (
+                  {isSandbox && c.isSandboxAuthorized && (
                     <div style={{ padding: '0.1rem 0.4rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '4px', fontSize: '0.6rem', color: '#EF4444', fontWeight: 800, textTransform: 'uppercase' }}>Sandbox</div>
                   )}
                 </div>
@@ -259,21 +267,23 @@ export default function ContactsPage() {
               {selectedId && <span style={{ fontSize: '0.7rem', color: '#444', fontWeight: 700 }}>El número de identidad no se puede modificar.</span>}
             </div>
 
-            <div style={{ background: 'rgba(239, 68, 68, 0.02)', border: '1px solid rgba(239, 68, 68, 0.1)', borderRadius: '20px', padding: '1.5rem', display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-              <div style={{ flex: 1 }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#EF4444', display: 'block', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Autorización Sandbox</span>
-                <p style={{ margin: 0, fontSize: '0.75rem', color: '#666', lineHeight: '1.4' }}>Permitir envío de mensajes en modo pruebas de Meta Developers.</p>
+            {isSandbox && (
+              <div style={{ background: 'rgba(239, 68, 68, 0.02)', border: '1px solid rgba(239, 68, 68, 0.1)', borderRadius: '20px', padding: '1.5rem', display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#EF4444', display: 'block', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Autorización Sandbox</span>
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: '#666', lineHeight: '1.4' }}>Permitir envío de mensajes en modo pruebas de Meta Developers.</p>
+                </div>
+                <div
+                  onClick={() => setIsSandboxAuthorized(!isSandboxAuthorized)}
+                  style={{
+                    width: '54px', height: '28px', borderRadius: '14px', background: isSandboxAuthorized ? '#EF4444' : '#1A1A1A', position: 'relative', cursor: 'pointer', transition: 'all 0.3s ease',
+                    boxShadow: isSandboxAuthorized ? '0 0 15px rgba(239, 68, 68, 0.3)' : 'none'
+                  }}
+                >
+                  <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'white', position: 'absolute', top: '4px', left: isSandboxAuthorized ? '30px' : '4px', transition: 'all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55)' }}></div>
+                </div>
               </div>
-              <div
-                onClick={() => setIsSandboxAuthorized(!isSandboxAuthorized)}
-                style={{
-                  width: '54px', height: '28px', borderRadius: '14px', background: isSandboxAuthorized ? '#EF4444' : '#1A1A1A', position: 'relative', cursor: 'pointer', transition: 'all 0.3s ease',
-                  boxShadow: isSandboxAuthorized ? '0 0 15px rgba(239, 68, 68, 0.3)' : 'none'
-                }}
-              >
-                <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'white', position: 'absolute', top: '4px', left: isSandboxAuthorized ? '30px' : '4px', transition: 'all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55)' }}></div>
-              </div>
-            </div>
+            )}
 
             {error && <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', borderRadius: '12px', fontSize: '0.85rem', textAlign: 'center', fontWeight: 700 }}>{error}</div>}
 

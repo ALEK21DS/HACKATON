@@ -93,6 +93,7 @@ export default function ChatPage() {
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editSandbox, setEditSandbox] = useState(false);
+  const [isSandbox, setIsSandbox] = useState(true);
   const [updatingContact, setUpdatingContact] = useState(false);
   const [gallery, setGallery] = useState<Message[]>([]);
   const [loadingGallery, setLoadingGallery] = useState(false);
@@ -113,6 +114,8 @@ export default function ChatPage() {
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sendingRef = useRef(false);
+  // Set de IDs de mensajes que ya fueron procesados vía respuesta de API (para que el WebSocket no los duplique)
+  const recentlySentIdsRef = useRef<Set<string>>(new Set());
 
   selectedIdRef.current = selectedId;
 
@@ -124,6 +127,9 @@ export default function ChatPage() {
     getMe().then(m => {
       myUserIdRef.current = m.id;
       myUserRoleRef.current = m.role;
+      if (m.isSandbox !== undefined) {
+        setIsSandbox(m.isSandbox);
+      }
       if (m.role === 'ORG_ADMIN') {
         getOrgUsers().then(u => setOrgUsers(u)).catch(() => {});
       }
@@ -141,7 +147,18 @@ export default function ChatPage() {
       loadConversations(false);
       if (payload.conversationId === selectedIdRef.current) {
         setMessages(prev => {
+          // Si ya existe por ID real, no duplicar
           if (prev.some(m => m.id === payload.message.id)) return prev;
+          // Para mensajes salientes (del agente): intentar reemplazar el temp pendiente
+          if (!payload.message.fromUser) {
+            const tempIdx = prev.findIndex(m => m.id.startsWith('temp_'));
+            if (tempIdx !== -1) {
+              const updated = [...prev];
+              updated[tempIdx] = { ...payload.message, status: payload.message.status || 'SENT' };
+              return updated;
+            }
+          }
+          // Mensaje entrante del contacto: agregar normalmente
           return [...prev, { ...payload.message, status: payload.message.status || 'RECEIVED' }];
         });
         markConversationAsRead(payload.conversationId);
@@ -243,9 +260,18 @@ export default function ChatPage() {
     setMessages(prev => [...prev, optimistic]);
     try {
       const res = await sendMessage(selectedId, text);
-      if (res && res.message) {
-        setMessages(prev => prev.map(m => m.id === tempId ? res.message : m));
-      }
+      setMessages(prev => {
+        // Si el WS ya agregó el mensaje real, solo eliminar el temp
+        if (res?.message && prev.some(m => m.id === res.message.id)) {
+          return prev.filter(m => m.id !== tempId);
+        }
+        // Si el WS no llegó aún, reemplazar el temp por el real
+        if (res?.message) {
+          return prev.map(m => m.id === tempId ? { ...res.message } : m);
+        }
+        // Sin respuesta válida, eliminar temp (el WS lo agregará)
+        return prev.filter(m => m.id !== tempId);
+      });
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== tempId));
       setReplyInput(text);
@@ -850,24 +876,26 @@ export default function ChatPage() {
               />
             </div>
 
-            <div style={{ background: 'rgba(239, 68, 68, 0.02)', border: '1px solid rgba(239, 68, 68, 0.1)', borderRadius: '14px', padding: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <div style={{ flex: 1 }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#EF4444', display: 'block', marginBottom: '0.2rem' }}>
-                  Sandbox
-                </span>
-                <p style={{ margin: 0, fontSize: '0.65rem', color: '#666', lineHeight: '1.3' }}>
-                  Permitir mensajería en pruebas.
-                </p>
+            {isSandbox && (
+              <div style={{ background: 'rgba(239, 68, 68, 0.02)', border: '1px solid rgba(239, 68, 68, 0.1)', borderRadius: '14px', padding: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#EF4444', display: 'block', marginBottom: '0.2rem' }}>
+                    Sandbox
+                  </span>
+                  <p style={{ margin: 0, fontSize: '0.65rem', color: '#666', lineHeight: '1.3' }}>
+                    Permitir mensajería en pruebas.
+                  </p>
+                </div>
+                <div 
+                  onClick={() => setEditSandbox(!editSandbox)}
+                  style={{ 
+                    width: '42px', height: '22px', borderRadius: '11px', background: editSandbox ? '#EF4444' : '#1A1A1A', position: 'relative', cursor: 'pointer', transition: 'all 0.3s ease'
+                  }}
+                >
+                  <div style={{ width: '14px', height: '14px', borderRadius: '50%', background: 'white', position: 'absolute', top: '4px', left: editSandbox ? '24px' : '4px', transition: 'all 0.3s' }}></div>
+                </div>
               </div>
-              <div 
-                onClick={() => setEditSandbox(!editSandbox)}
-                style={{ 
-                  width: '42px', height: '22px', borderRadius: '11px', background: editSandbox ? '#EF4444' : '#1A1A1A', position: 'relative', cursor: 'pointer', transition: 'all 0.3s ease'
-                }}
-              >
-                <div style={{ width: '14px', height: '14px', borderRadius: '50%', background: 'white', position: 'absolute', top: '4px', left: editSandbox ? '24px' : '4px', transition: 'all 0.3s' }}></div>
-              </div>
-            </div>
+            )}
 
             <button 
               type="submit" 
