@@ -18,9 +18,9 @@ export function AppModal({ isOpen, title, onClose, children }: AppModalProps) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[720px] bg-[#0d0d0d] rounded-2xl p-6 sm:p-8 border border-white/10 shadow-[0_0_60px_rgba(0,0,0,0.8)] text-[#F2F2F2]"
+        className="w-full max-w-[720px] max-h-[calc(100vh-2rem)] flex flex-col bg-[#0d0d0d] rounded-2xl p-6 sm:p-8 border border-white/10 shadow-[0_0_60px_rgba(0,0,0,0.8)] text-[#F2F2F2]"
       >
-        <div className="flex justify-between items-center mb-6 border-b border-[#404040]/30 pb-4">
+        <div className="flex justify-between items-center mb-6 border-b border-[#404040]/30 pb-4 flex-shrink-0">
           <h2 className="font-headline font-bold text-xl">{title}</h2>
           <button 
             type="button" 
@@ -32,7 +32,9 @@ export function AppModal({ isOpen, title, onClose, children }: AppModalProps) {
             </svg>
           </button>
         </div>
-        {children}
+        <div className="overflow-y-auto flex-1 pr-1 min-h-0 [scrollbar-width:thin] [scrollbar-color:#404040_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#404040]/50 [&::-webkit-scrollbar-thumb]:rounded-full">
+          {children}
+        </div>
       </div>
     </div>
   );

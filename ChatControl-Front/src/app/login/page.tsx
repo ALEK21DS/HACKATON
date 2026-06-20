@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import gsap from 'gsap';
-import { getMe, login, loginLegacy, logout } from '@/lib/api';
+import { getMe, login, loginLegacy } from '@/lib/api';
 
 type LoginMode = 'email' | 'phone';
 
@@ -119,7 +119,15 @@ export default function LoginPage() {
       const me = await getMe();
       router.replace(me.role === 'SUPER_ADMIN' ? '/platform' : '/chat');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo iniciar sesion. Revisa tus credenciales.');
+      let msg = 'No se pudo iniciar sesión. Revisa tus credenciales.';
+      if (err instanceof Error) {
+        if (err.message.toLowerCase().includes('fetch') || err.message.toLowerCase().includes('network')) {
+          msg = 'No se pudo conectar con el servidor. Verifica tu conexión a internet.';
+        } else {
+          msg = err.message;
+        }
+      }
+      setError(msg);
       gsap.fromTo('.auth-panel', { x: -5 }, { x: 5, duration: 0.06, yoyo: true, repeat: 4, ease: 'none', clearProps: 'transform' });
     } finally {
       setLoading(false);
@@ -135,8 +143,8 @@ export default function LoginPage() {
     <main ref={containerRef} className="login-shell min-h-dvh overflow-hidden bg-[#040404] text-[#f2f2f2]">
       <div className="login-grid-bg fixed inset-0 pointer-events-none" />
 
-      <section className="relative z-10 grid min-h-dvh grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(430px,520px)]">
-        <div className="brand-panel relative flex min-h-[42dvh] flex-col justify-between overflow-hidden border-b border-white/10 px-6 py-7 sm:px-10 lg:min-h-dvh lg:border-b-0 lg:border-r lg:border-[#ef4444]/20">
+      <section className="relative z-10 grid min-h-dvh grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(430px,520px)] lg:h-dvh lg:overflow-hidden">
+        <div className="brand-panel relative hidden lg:flex lg:h-dvh lg:flex-col lg:justify-between overflow-hidden lg:border-r lg:border-[#ef4444]/20 px-6 py-7 sm:px-10">
           <div className="login-scanline absolute inset-0 pointer-events-none" />
           <div className="login-redline absolute right-0 top-0 hidden h-full w-px lg:block" />
           <Image
@@ -185,22 +193,33 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <div className="flex items-center justify-center px-4 py-8 sm:px-8 lg:px-10">
-          <div className="auth-panel login-gloss-panel relative w-full max-w-[440px] overflow-hidden rounded-lg p-5 sm:p-7">
+        <div className="flex flex-col items-center justify-center px-4 py-6 sm:px-8 lg:px-10 min-h-dvh lg:h-dvh lg:overflow-hidden">
+          {/* Logo next to brand visible only on mobile/tablet */}
+          <div className="flex items-center gap-3 mb-6 lg:hidden">
+            <div className="login-logo-tile flex h-10 w-10 items-center justify-center rounded-lg border border-white/15 bg-white/[0.04]">
+              <Image src="/assets/images/NOIRLINE2.png" alt="Nextline" width={24} height={24} className="h-6 w-6 object-contain" priority />
+            </div>
+            <div>
+              <p className="text-sm font-extrabold text-white">Nextline</p>
+              <p className="text-xs text-[#8c8c8c]">ChatControl Console</p>
+            </div>
+          </div>
+
+          <div className="auth-panel login-gloss-panel relative w-full max-w-[440px] overflow-hidden rounded-lg p-4 sm:p-5 lg:p-6">
             <div className="login-reflection pointer-events-none absolute inset-x-0 top-0 h-24" />
-            <div className="login-stagger mb-7 flex items-start justify-between gap-4">
+            <div className="login-stagger mb-3.5 sm:mb-4.5 lg:mb-5 flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold text-[#ffdad7]">Acceso seguro</p>
-                <h2 className="mt-2 text-3xl font-black leading-tight text-white">Bienvenido de vuelta</h2>
+                <p className="text-xs sm:text-sm font-semibold text-[#ffdad7]">Acceso seguro</p>
+                <h2 className="mt-1.5 text-2xl sm:text-3xl font-black leading-tight text-white">Bienvenido de vuelta</h2>
               </div>
-              <Image src="/assets/images/krakedev_logo-ByJvfRFA.png" alt="Krakedev" width={82} height={48} className="mt-1 h-auto w-20 object-contain opacity-80" />
+              <Image src="/assets/images/krakedev_logo-ByJvfRFA.png" alt="Krakedev" width={72} height={42} className="mt-1 h-auto w-18 object-contain opacity-80" />
             </div>
 
-            <div className="login-stagger mb-6 grid grid-cols-2 rounded-lg border border-white/10 bg-black/35 p-1 shadow-inner shadow-black/60">
+            <div className="login-stagger mb-3 sm:mb-4 lg:mb-5 grid grid-cols-2 rounded-lg border border-white/10 bg-black/35 p-1 shadow-inner shadow-black/60">
               <button
                 type="button"
                 onClick={() => switchMode('email')}
-                className={`min-h-11 rounded-md px-3 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444] ${!isPhoneMode ? 'bg-[#f5f2ee] text-[#161311]' : 'text-[#b7aea6] hover:text-white'}`}
+                className={`min-h-9 rounded-md px-3 text-xs sm:text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444] ${!isPhoneMode ? 'bg-[#f5f2ee] text-[#161311]' : 'text-[#b7aea6] hover:text-white'}`}
                 aria-pressed={!isPhoneMode}
               >
                 Correo
@@ -208,16 +227,16 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => switchMode('phone')}
-                className={`min-h-11 rounded-md px-3 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444] ${isPhoneMode ? 'bg-[#f5f2ee] text-[#161311]' : 'text-[#b7aea6] hover:text-white'}`}
+                className={`min-h-9 rounded-md px-3 text-xs sm:text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444] ${isPhoneMode ? 'bg-[#f5f2ee] text-[#161311]' : 'text-[#b7aea6] hover:text-white'}`}
                 aria-pressed={isPhoneMode}
               >
                 Telefono
               </button>
             </div>
 
-            <form className="space-y-5" onSubmit={handleSubmit}>
-              <div className="login-stagger space-y-2">
-                <label htmlFor={isPhoneMode ? 'phone' : 'email'} className="block text-sm font-bold text-[#d8d0c8]">
+            <form className="space-y-3.5 sm:space-y-4" onSubmit={handleSubmit}>
+              <div className="login-stagger space-y-1.5">
+                <label htmlFor={isPhoneMode ? 'phone' : 'email'} className="block text-xs sm:text-sm font-bold text-[#d8d0c8]">
                   {isPhoneMode ? 'Numero de telefono' : 'Correo electronico'}
                 </label>
                 <div className="group relative">
@@ -232,14 +251,14 @@ export default function LoginPage() {
                     autoComplete={isPhoneMode ? 'tel' : 'email'}
                     value={isPhoneMode ? phone : email}
                     onChange={(e) => (isPhoneMode ? setPhone(e.target.value) : setEmail(e.target.value))}
-                    className="login-gloss-field min-h-12 w-full rounded-lg border border-white/10 py-3 pl-12 pr-4 text-base text-white outline-none transition-colors placeholder:text-[#8c8c8c]/70 focus:border-[#ef4444]/70 focus:ring-2 focus:ring-[#ef4444]/20"
+                    className="login-gloss-field min-h-9 sm:min-h-11 w-full rounded-lg border border-white/10 py-2 sm:py-2.5 pl-12 pr-4 text-xs sm:text-sm text-white outline-none transition-colors placeholder:text-[#8c8c8c]/70 focus:border-[#ef4444]/70 focus:ring-2 focus:ring-[#ef4444]/20"
                     placeholder={isPhoneMode ? '593999999999' : 'admin@empresa.com'}
                   />
                 </div>
               </div>
 
-              <div className="login-stagger space-y-2">
-                <label htmlFor="password" className="block text-sm font-bold text-[#d8d0c8]">
+              <div className="login-stagger space-y-1.5">
+                <label htmlFor="password" className="block text-xs sm:text-sm font-bold text-[#d8d0c8]">
                   Contrasena
                 </label>
                 <div className="group relative">
@@ -253,13 +272,13 @@ export default function LoginPage() {
                     autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="login-gloss-field min-h-12 w-full rounded-lg border border-white/10 py-3 pl-12 pr-14 text-base text-white outline-none transition-colors placeholder:text-[#8c8c8c]/70 focus:border-[#ef4444]/70 focus:ring-2 focus:ring-[#ef4444]/20"
+                    className="login-gloss-field min-h-9 sm:min-h-11 w-full rounded-lg border border-white/10 py-2 sm:py-2.5 pl-12 pr-14 text-xs sm:text-sm text-white outline-none transition-colors placeholder:text-[#8c8c8c]/70 focus:border-[#ef4444]/70 focus:ring-2 focus:ring-[#ef4444]/20"
                     placeholder="Tu clave de acceso"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((value) => !value)}
-                    className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-md text-[#9f968e] transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444]"
+                    className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-[#9f968e] transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444]"
                     aria-label={showPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
                   >
                     <EyeIcon hidden={showPassword} />
@@ -268,7 +287,7 @@ export default function LoginPage() {
               </div>
 
               {error && (
-                <div className="login-stagger rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10 px-4 py-3 text-sm font-semibold text-[#ffb4ad]" role="alert">
+                <div className="rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10 px-3 py-2 text-xs sm:text-sm font-semibold text-[#ffb4ad]" role="alert">
                   {error}
                 </div>
               )}
@@ -276,35 +295,23 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="login-stagger group flex min-h-12 w-full items-center justify-between rounded-lg px-4 py-3 text-base font-black text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffdad7] disabled:cursor-wait disabled:opacity-70"
+                className="login-stagger group flex min-h-9 sm:min-h-11 w-full items-center justify-between rounded-lg px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-black text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffdad7] disabled:cursor-wait disabled:opacity-70"
                 style={{
                   background: 'linear-gradient(135deg, #ff5a5a 0%, #ef4444 38%, #b91a24 100%)',
                   boxShadow: '0 18px 44px rgba(239, 68, 68, 0.28)',
                 }}
               >
                 <span>{loading ? 'Entrando...' : 'Entrar al panel'}</span>
-                <span className="flex h-9 w-9 items-center justify-center rounded-md bg-white/15 transition-transform group-hover:translate-x-0.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-md bg-white/15 transition-transform group-hover:translate-x-0.5">
                   <ArrowIcon />
                 </span>
               </button>
             </form>
 
-            <div className="login-stagger mt-6 border-t border-white/10 pt-5">
-              <p className="text-sm leading-6 text-[#8c8c8c]">
+            <div className="login-stagger mt-3 sm:mt-4 lg:mt-5 border-t border-white/10 pt-3 sm:pt-4">
+              <p className="text-[11px] sm:text-xs leading-normal sm:leading-relaxed text-[#8c8c8c]">
                 Usa las credenciales creadas por el administrador de tu organizacion. El acceso legacy por telefono queda disponible para migraciones.
               </p>
-              <button
-                type="button"
-                onClick={() => { logout(); router.refresh(); }}
-                className="mt-3 flex items-center gap-2 text-xs font-bold text-[#ef4444]/70 transition-colors hover:text-[#ef4444] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444]"
-              >
-                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                  <polyline points="16 17 21 12 16 7" />
-                  <line x1="21" y1="12" x2="9" y2="12" />
-                </svg>
-                <span>Cerrar sesion / Limpiar cache</span>
-              </button>
             </div>
           </div>
         </div>

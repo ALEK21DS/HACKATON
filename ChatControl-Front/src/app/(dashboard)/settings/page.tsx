@@ -122,7 +122,6 @@ export default function SettingsPage() {
     setSuccess('');
     try {
       const updated = await updateSettings({
-        whatsappTier,
         geminiModel: geminiModel.trim() || 'gemini-2.5-flash',
       });
       setSettings(updated);
@@ -215,35 +214,24 @@ export default function SettingsPage() {
                   {syncing ? 'Sincronizando...' : 'Sincronizar con Meta'}
                 </button>
               </div>
-              <select
-                id="whatsapp-tier"
-                value={whatsappTier}
-                disabled={myRole === 'AGENT'}
-                onChange={(e) => setWhatsappTier(e.target.value as WhatsappTier)}
-                style={{ 
-                  width: '100%', 
-                  background: 'rgba(255,255,255,0.05)', 
-                  border: '1px solid rgba(64,64,64,0.3)', 
-                  borderRadius: 10, 
-                  padding: '0.85rem 1rem', 
+              <div
+                style={{
+                  width: '100%',
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  borderRadius: 10,
+                  padding: '0.85rem 1rem',
                   color: '#F2F2F2',
                   fontSize: '0.95rem',
-                  outline: 'none',
-                  appearance: 'none',
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23EF4444' stroke-width='3'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: 'no-repeat',
-                  backgroundPosition: 'right 1rem center',
-                  backgroundSize: '1.25rem',
-                  cursor: 'pointer',
-                  transition: 'border-color 0.2s ease'
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.65rem'
                 }}
               >
-                {(Object.keys(TIER_LABELS) as WhatsappTier[]).map((t) => (
-                  <option key={t} value={t} style={{ background: '#0d0d0d', padding: '1rem' }}>
-                    {TIER_LABELS[t]}
-                  </option>
-                ))}
-              </select>
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#EF4444', boxShadow: '0 0 8px #EF4444' }}></div>
+                {TIER_LABELS[whatsappTier] || TIER_LABELS['new']}
+              </div>
               {settings && (
                 <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: 8, display: 'inline-block' }}>
                   <span style={{ fontSize: '0.8rem', color: '#EF4444', fontWeight: 700 }}>
