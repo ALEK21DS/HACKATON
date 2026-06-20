@@ -7,6 +7,7 @@ import {
   isLoggedIn,
   getSettings,
   updateSettings,
+  syncWhatsappLimit,
   getMe,
   type SettingsData,
   type WhatsappTier,
@@ -62,8 +63,29 @@ export default function SettingsPage() {
   const [myRole, setMyRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const handleSyncLimit = async () => {
+    setSyncing(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await syncWhatsappLimit();
+      setWhatsappTier(res.whatsappTier);
+      setSettings(prev => prev ? {
+        ...prev,
+        whatsappTier: res.whatsappTier,
+        dailyLimit: res.dailyLimit
+      } : null);
+      setSuccess(`Límites sincronizados correctamente desde Meta. Nivel: ${TIER_LABELS[res.whatsappTier]}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al sincronizar con Meta');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -150,9 +172,49 @@ export default function SettingsPage() {
             </div>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <label htmlFor="whatsapp-tier" style={{ fontSize: '0.8rem', color: '#8C8C8C', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Tier de Conversaciones
-              </label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                <label htmlFor="whatsapp-tier" style={{ fontSize: '0.8rem', color: '#8C8C8C', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Tier de Conversaciones
+                </label>
+                <button
+                  type="button"
+                  disabled={syncing || myRole === 'AGENT'}
+                  onClick={handleSyncLimit}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    color: '#EF4444',
+                    padding: '0.3rem 0.75rem',
+                    borderRadius: '8px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    cursor: (syncing || myRole === 'AGENT') ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    transition: 'all 0.2s ease',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.02em',
+                  }}
+                  onMouseOver={(e) => {
+                    if (myRole !== 'AGENT') {
+                      e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)';
+                      e.currentTarget.style.borderColor = '#EF4444';
+                    }
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+                  }}
+                >
+                  {syncing ? <Spinner size={14} /> : (
+                    <svg style={{ width: '0.7rem', height: '0.7rem' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                    </svg>
+                  )}
+                  {syncing ? 'Sincronizando...' : 'Sincronizar con Meta'}
+                </button>
+              </div>
               <select
                 id="whatsapp-tier"
                 value={whatsappTier}

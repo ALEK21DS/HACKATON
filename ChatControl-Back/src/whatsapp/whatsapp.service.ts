@@ -377,4 +377,81 @@ export class WhatsAppService {
       mimeType: metaData.mime_type,
     };
   }
+
+  async syncMessagingLimit(organizationId: string): Promise<{ whatsappTier: string; dailyLimit: number | null }> {
+    const { accessToken, phoneNumberId } = await this.resolveCredentials(organizationId);
+    
+    // Query Meta Graph API for messaging limit
+    const url = `${this.baseUrl}/${phoneNumberId}?fields=whatsapp_business_manager_messaging_limit`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    
+    const data = (await res.json()) as {
+      whatsapp_business_manager_messaging_limit?: string;
+      error?: { message: string };
+    };
+    
+    if (data.error) {
+      throw new BadRequestException(data.error.message || 'Error al obtener límites de WhatsApp de Meta');
+    }
+    
+    const metaLimit = data.whatsapp_business_manager_messaging_limit || 'TIER_250';
+    
+    // Map Meta limit string to our internal WhatsappTier enum
+    let tier = 'new';
+    switch (metaLimit) {
+      case 'TIER_250':
+        tier = 'new';
+        break;
+      case 'TIER_1K':
+      case 'TIER_2K':
+        tier = 'level1';
+        break;
+      case 'TIER_10K':
+        tier = 'level2';
+        break;
+      case 'TIER_100K':
+        tier = 'level3';
+        break;
+      case 'UNLIMITED':
+        tier = 'excellent';
+        break;
+      default:
+        tier = 'new';
+    }
+    
+    // Upsert the organization setting in database
+    await this.prisma.organizationSetting.upsert({
+      where: {
+        organizationId_key: { organizationId, key: 'whatsapp_tier' },
+      },
+      create: {
+        organizationId,
+        key: 'whatsapp_tier',
+        value: tier,
+      },
+      update: {
+        value: tier,
+      },
+    });
+    
+    const limits: Record<string, number> = {
+      new: 250,
+      level1: 1000,
+      level2: 10000,
+      level3: 100000,
+      excellent: Number.MAX_SAFE_INTEGER,
+    };
+    
+    const dailyLimit = limits[tier];
+    
+    return {
+      whatsappTier: tier,
+      dailyLimit: dailyLimit === Number.MAX_SAFE_INTEGER ? null : dailyLimit,
+    };
+  }
 }

@@ -8,8 +8,12 @@ import {
   Query,
   Res,
   UnauthorizedException,
+  UseGuards,
   forwardRef,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthUser } from '../auth/auth.types';
 import { Response } from 'express';
 import { WhatsAppService } from './whatsapp.service';
 import { ChatService } from '../chat/chat.service';
@@ -170,6 +174,12 @@ export class WhatsAppController {
         }
       }
     }
+  }
+
+  @Post('sync-limit')
+  @UseGuards(JwtAuthGuard)
+  async syncLimit(@CurrentUser() user: AuthUser) {
+    return this.whatsapp.syncMessagingLimit(user.organizationId!);
   }
 
   private mapWhatsappStatus(status: string): MessageStatus | null {

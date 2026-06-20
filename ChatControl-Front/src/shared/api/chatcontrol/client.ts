@@ -396,6 +396,12 @@ export async function updateSettings(body: {
   });
 }
 
+export async function syncWhatsappLimit(): Promise<{ whatsappTier: WhatsappTier; dailyLimit: number | null }> {
+  return api<{ whatsappTier: WhatsappTier; dailyLimit: number | null }>('/whatsapp/sync-limit', {
+    method: 'POST',
+  });
+}
+
 // Plataforma (super admin)
 export interface PlatformOrganization {
   id: string;
