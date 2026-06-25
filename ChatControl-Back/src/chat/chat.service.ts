@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { MessageDirection, MessageStatus, MessageType, Prisma } from '@prisma/client';
+import { MessageDirection, MessageStatus, MessageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { Window24hService } from '../common/window-24h.service';
@@ -10,6 +10,7 @@ import { ChatGateway } from './chat.gateway';
 import { LeadDetectionService } from '../lead-assignment/lead-detection.service';
 import { StorageService } from '../common/storage.service';
 import { normalizePhone } from '../common/text-similarity.util';
+import { ConversationsQueryService } from './conversations-query.service';
 
 export interface Message {
   id: string;
@@ -52,6 +53,7 @@ export class ChatService {
     private readonly config: ConfigService,
     private readonly leadDetection: LeadDetectionService,
     private readonly storage: StorageService,
+    private readonly conversationsQuery: ConversationsQueryService,
   ) {}
 
   async registerIncomingMessage(payload: {
@@ -185,74 +187,7 @@ export class ChatService {
     userId?: string,
     userRole?: string,
   ): Promise<Conversation[]> {
-    const where: any = { contact: { organizationId } };
-
-    if (userRole === 'AGENT' && userId) {
-      where.assignedToUserId = userId;
-    }
-
-    const list = await this.prisma.conversation.findMany({
-      where,
-      include: {
-        contact: true,
-        messages: {
-          orderBy: { whatsappTimestamp: 'desc' },
-          take: 1,
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    const unreadCounts = await this.getUnreadCountsBulk(list.map((c) => c.id));
-    const withUnread = list.map((c) => {
-      const lastMsg = c.messages[0];
-      const unreadCount = unreadCounts.get(c.id) ?? 0;
-      let lastMessagePreview = lastMsg?.body.slice(0, 80) ?? '';
-      if (lastMsg && !lastMessagePreview) {
-        if (lastMsg.type === MessageType.IMAGE) lastMessagePreview = '📷 Imagen';
-        else if (lastMsg.type === MessageType.VIDEO) lastMessagePreview = '🎥 Video';
-        else if (lastMsg.type === MessageType.AUDIO) lastMessagePreview = '🎵 Audio';
-        else if (lastMsg.type === MessageType.DOCUMENT) lastMessagePreview = '📄 Documento';
-      }
-      return {
-        id: c.id,
-        phone: c.contact.phone,
-        name: c.contact.name ?? undefined,
-        email: c.contact.email ?? undefined,
-        contactId: c.contact.id,
-        isSandboxAuthorized: c.contact.isSandboxAuthorized,
-        lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
-        lastMessagePreview,
-        lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
-        unreadCount,
-        assignedToUserId: c.assignedToUserId,
-        isNewLead: c.isNewLead,
-      };
-    });
-    return withUnread.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
-  }
-
-  private async getUnreadCountsBulk(conversationIds: string[]): Promise<Map<string, number>> {
-    if (conversationIds.length === 0) return new Map();
-    const rows = await this.prisma.$queryRaw<{ conversationId: string; unreadCount: bigint }[]>`
-      SELECT m."conversationId" as "conversationId", COUNT(*)::bigint as "unreadCount"
-      FROM "Message" m
-      JOIN "Conversation" c ON c.id = m."conversationId"
-      WHERE m."conversationId" IN (${Prisma.join(conversationIds)})
-        AND m.direction = 'IN'::"MessageDirection"
-        AND m."whatsappTimestamp" > COALESCE(c."lastReadAt", to_timestamp(0))
-      GROUP BY m."conversationId"
-    `;
-    return new Map(rows.map((r) => [r.conversationId, Number(r.unreadCount)]));
-  }
-
-  private async getUnreadCount(conversationId: string, lastReadAt: Date | null): Promise<number> {
-    return this.prisma.message.count({
-      where: {
-        conversationId,
-        direction: MessageDirection.IN,
-        whatsappTimestamp: { gt: lastReadAt ?? new Date(0) },
-      },
-    });
+    return this.conversationsQuery.getConversations(organizationId, userId, userRole);
   }
 
   async markConversationAsRead(conversationId: string, organizationId: string): Promise<void> {
@@ -372,45 +307,7 @@ export class ChatService {
     userId?: string,
     userRole?: string,
   ): Promise<Conversation | undefined> {
-    const c = await this.prisma.conversation.findFirst({
-      where: { id: conversationId, contact: { organizationId } },
-      include: {
-        contact: true,
-        messages: {
-          orderBy: { whatsappTimestamp: 'desc' },
-          take: 1,
-        },
-      },
-    });
-    if (!c) return undefined;
-
-    if (userRole === 'AGENT' && userId && c.assignedToUserId !== userId) {
-      return undefined;
-    }
-
-    const lastMsg = c.messages[0];
-    const unreadCount = await this.getUnreadCount(conversationId, c.lastReadAt);
-    let lastMessagePreview = lastMsg?.body.slice(0, 80) ?? '';
-    if (lastMsg && !lastMessagePreview) {
-      if (lastMsg.type === MessageType.IMAGE) lastMessagePreview = '📷 Imagen';
-      else if (lastMsg.type === MessageType.VIDEO) lastMessagePreview = '🎥 Video';
-      else if (lastMsg.type === MessageType.AUDIO) lastMessagePreview = '🎵 Audio';
-      else if (lastMsg.type === MessageType.DOCUMENT) lastMessagePreview = '📄 Documento';
-    }
-    return {
-      id: c.id,
-      phone: c.contact.phone,
-      name: c.contact.name ?? undefined,
-      email: c.contact.email ?? undefined,
-      contactId: c.contact.id,
-      isSandboxAuthorized: c.contact.isSandboxAuthorized,
-      lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
-      lastMessagePreview,
-      lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
-      unreadCount,
-      assignedToUserId: c.assignedToUserId,
-      isNewLead: c.isNewLead,
-    };
+    return this.conversationsQuery.getConversation(conversationId, organizationId, userId, userRole);
   }
 
   async canSendToConversation(conversationId: string, organizationId: string): Promise<boolean> {
