@@ -469,15 +469,9 @@ export class ChatService {
     return c?.lastUserMessageAt ?? null;
   }
 
-  async sendMessage(params: {
-    organizationId: string;
-    conversationId: string;
-    text: string;
-    fromAi?: boolean;
-    sentByUserId?: string | null;
-  }): Promise<Message> {
+  private async assertCanSendAndGetConversation(organizationId: string, conversationId: string) {
     const conv = await this.prisma.conversation.findFirst({
-      where: { id: params.conversationId, contact: { organizationId: params.organizationId } },
+      where: { id: conversationId, contact: { organizationId } },
       include: { contact: true },
     });
     if (!conv) throw new BadRequestException('Conversación no encontrada');
@@ -487,7 +481,18 @@ export class ChatService {
         'Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.',
       );
     }
-    await this.settings.checkDailyLimitOrThrow(params.conversationId, params.organizationId);
+    await this.settings.checkDailyLimitOrThrow(conversationId, organizationId);
+    return conv;
+  }
+
+  async sendMessage(params: {
+    organizationId: string;
+    conversationId: string;
+    text: string;
+    fromAi?: boolean;
+    sentByUserId?: string | null;
+  }): Promise<Message> {
+    const conv = await this.assertCanSendAndGetConversation(params.organizationId, params.conversationId);
     const lastUserMessageAt = conv.lastUserMessageAt ? new Date(conv.lastUserMessageAt) : null;
     const { messageId } = await this.whatsapp.sendTextMessage(params.organizationId, {
       to: conv.contact.phone,
@@ -529,19 +534,7 @@ export class ChatService {
     fileName?: string;
     sentByUserId?: string | null;
   }): Promise<Message> {
-    const conv = await this.prisma.conversation.findFirst({
-      where: { id: params.conversationId, contact: { organizationId: params.organizationId } },
-      include: { contact: true },
-    });
-    if (!conv) throw new BadRequestException('Conversación no encontrada');
-
-    const isSandbox = this.config.get<string>('WHATSAPP_SANDBOX', 'true') === 'true';
-    if (isSandbox && !conv.contact.isSandboxAuthorized) {
-      throw new ForbiddenException(
-        'Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.',
-      );
-    }
-    await this.settings.checkDailyLimitOrThrow(params.conversationId, params.organizationId);
+    const conv = await this.assertCanSendAndGetConversation(params.organizationId, params.conversationId);
     const lastUserMessageAt = conv.lastUserMessageAt ? new Date(conv.lastUserMessageAt) : null;
 
     const msgType = params.mimeType.startsWith('image/') ? MessageType.IMAGE
@@ -597,18 +590,7 @@ export class ChatService {
     type: MessageType;
     sentByUserId?: string | null;
   }): Promise<Message> {
-    const conv = await this.prisma.conversation.findFirst({
-      where: { id: params.conversationId, contact: { organizationId: params.organizationId } },
-      include: { contact: true },
-    });
-    if (!conv) throw new BadRequestException('Conversación no encontrada');
-    const isSandbox = this.config.get<string>('WHATSAPP_SANDBOX', 'true') === 'true';
-    if (isSandbox && !conv.contact.isSandboxAuthorized) {
-      throw new ForbiddenException(
-        'Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.',
-      );
-    }
-    await this.settings.checkDailyLimitOrThrow(params.conversationId, params.organizationId);
+    const conv = await this.assertCanSendAndGetConversation(params.organizationId, params.conversationId);
 
     const timestamp = Date.now();
     const path = `chats/${params.organizationId}/sent_${timestamp}_${params.file.originalname}`;
