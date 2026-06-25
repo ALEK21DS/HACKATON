@@ -7,14 +7,9 @@ import { Window24hService } from '../common/window-24h.service';
 import { AiService } from '../ai/ai.service';
 import { SettingsService } from '../settings/settings.service';
 import { ChatGateway } from './chat.gateway';
-import { LeadAssignmentService } from '../lead-assignment/lead-assignment.service';
-import { IntegrationsService } from '../integrations/integrations.service';
+import { LeadDetectionService } from '../lead-assignment/lead-detection.service';
 import { StorageService } from '../common/storage.service';
-import {
-  normalizePhone,
-  normalizeMessageText,
-  computeSimilarity,
-} from '../common/text-similarity.util';
+import { normalizePhone } from '../common/text-similarity.util';
 
 export interface Message {
   id: string;
@@ -55,8 +50,7 @@ export class ChatService {
     private readonly settings: SettingsService,
     private readonly chatGateway: ChatGateway,
     private readonly config: ConfigService,
-    private readonly leadAssignment: LeadAssignmentService,
-    private readonly integrations: IntegrationsService,
+    private readonly leadDetection: LeadDetectionService,
     private readonly storage: StorageService,
   ) {}
 
@@ -156,7 +150,7 @@ export class ChatService {
       });
 
       if (isNewConversation && payload.type === MessageType.TEXT) {
-        await this.tryAutoDetectAndAssign(conversation.id, payload.organizationId, payload.text);
+        await this.leadDetection.tryAutoDetectAndAssign(conversation.id, payload.organizationId, payload.text);
       }
 
       this.chatGateway.emitNewMessage(
@@ -177,36 +171,6 @@ export class ChatService {
     }
   }
 
-  private async tryAutoDetectAndAssign(
-    conversationId: string,
-    organizationId: string,
-    messageText: string,
-  ): Promise<void> {
-    try {
-      const config = await this.integrations.getLeadDetectionConfig(organizationId);
-      if (!config.enabled || !config.autoMessage) return;
-
-      const normalizedReceived = normalizeMessageText(messageText);
-      const normalizedConfigured = normalizeMessageText(config.autoMessage);
-
-      if (normalizedReceived.length < 10 || normalizedConfigured.length < 10) return;
-
-      const similarity = computeSimilarity(normalizedReceived, normalizedConfigured);
-      if (similarity < 0.75) return;
-
-      await this.prisma.conversation.update({
-        where: { id: conversationId },
-        data: {
-          autoMessageDetectedAt: new Date(),
-          isNewLead: true,
-        },
-      });
-
-      await this.leadAssignment.assignNewLead(conversationId, organizationId);
-    } catch (error) {
-      // Silently fail - lead detection should never break message reception
-    }
-  }
 
   private async assertConversationInOrg(conversationId: string, organizationId: string): Promise<void> {
     const c = await this.prisma.conversation.findFirst({
