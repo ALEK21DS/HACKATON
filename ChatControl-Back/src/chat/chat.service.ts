@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { MessageDirection, MessageStatus, MessageType } from '@prisma/client';
+import { MessageDirection, MessageStatus, MessageType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { Window24hService } from '../common/window-24h.service';
@@ -272,47 +272,55 @@ export class ChatService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    const withUnread = await Promise.all(
-      list.map(async (c) => {
-        const lastMsg = c.messages[0];
-        const unreadCount = await this.getUnreadCount(c.id);
-        let lastMessagePreview = lastMsg?.body.slice(0, 80) ?? '';
-        if (lastMsg && !lastMessagePreview) {
-          if (lastMsg.type === MessageType.IMAGE) lastMessagePreview = '📷 Imagen';
-          else if (lastMsg.type === MessageType.VIDEO) lastMessagePreview = '🎥 Video';
-          else if (lastMsg.type === MessageType.AUDIO) lastMessagePreview = '🎵 Audio';
-          else if (lastMsg.type === MessageType.DOCUMENT) lastMessagePreview = '📄 Documento';
-        }
-        return {
-          id: c.id,
-          phone: c.contact.phone,
-          name: c.contact.name ?? undefined,
-          email: c.contact.email ?? undefined,
-          contactId: c.contact.id,
-          isSandboxAuthorized: c.contact.isSandboxAuthorized,
-          lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
-          lastMessagePreview,
-          lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
-          unreadCount,
-          assignedToUserId: c.assignedToUserId,
-          isNewLead: c.isNewLead,
-        };
-      }),
-    );
+    const unreadCounts = await this.getUnreadCountsBulk(list.map((c) => c.id));
+    const withUnread = list.map((c) => {
+      const lastMsg = c.messages[0];
+      const unreadCount = unreadCounts.get(c.id) ?? 0;
+      let lastMessagePreview = lastMsg?.body.slice(0, 80) ?? '';
+      if (lastMsg && !lastMessagePreview) {
+        if (lastMsg.type === MessageType.IMAGE) lastMessagePreview = '📷 Imagen';
+        else if (lastMsg.type === MessageType.VIDEO) lastMessagePreview = '🎥 Video';
+        else if (lastMsg.type === MessageType.AUDIO) lastMessagePreview = '🎵 Audio';
+        else if (lastMsg.type === MessageType.DOCUMENT) lastMessagePreview = '📄 Documento';
+      }
+      return {
+        id: c.id,
+        phone: c.contact.phone,
+        name: c.contact.name ?? undefined,
+        email: c.contact.email ?? undefined,
+        contactId: c.contact.id,
+        isSandboxAuthorized: c.contact.isSandboxAuthorized,
+        lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
+        lastMessagePreview,
+        lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
+        unreadCount,
+        assignedToUserId: c.assignedToUserId,
+        isNewLead: c.isNewLead,
+      };
+    });
     return withUnread.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
   }
 
-  private async getUnreadCount(conversationId: string): Promise<number> {
-    const conv = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
-      select: { lastReadAt: true },
-    });
-    const since = conv?.lastReadAt ?? new Date(0);
+  private async getUnreadCountsBulk(conversationIds: string[]): Promise<Map<string, number>> {
+    if (conversationIds.length === 0) return new Map();
+    const rows = await this.prisma.$queryRaw<{ conversationId: string; unreadCount: bigint }[]>`
+      SELECT m."conversationId" as "conversationId", COUNT(*)::bigint as "unreadCount"
+      FROM "Message" m
+      JOIN "Conversation" c ON c.id = m."conversationId"
+      WHERE m."conversationId" IN (${Prisma.join(conversationIds)})
+        AND m.direction = 'IN'::"MessageDirection"
+        AND m."whatsappTimestamp" > COALESCE(c."lastReadAt", to_timestamp(0))
+      GROUP BY m."conversationId"
+    `;
+    return new Map(rows.map((r) => [r.conversationId, Number(r.unreadCount)]));
+  }
+
+  private async getUnreadCount(conversationId: string, lastReadAt: Date | null): Promise<number> {
     return this.prisma.message.count({
       where: {
         conversationId,
         direction: MessageDirection.IN,
-        whatsappTimestamp: { gt: since },
+        whatsappTimestamp: { gt: lastReadAt ?? new Date(0) },
       },
     });
   }
@@ -331,16 +339,11 @@ export class ChatService {
     userRole?: string,
   ): Promise<Array<Conversation & { canSend: boolean; windowSecondsRemaining: number }>> {
     const list = await this.getConversations(organizationId, userId, userRole);
-    const result = await Promise.all(
-      list.map(async (c) => {
-        const [canSend, windowSecondsRemaining] = await Promise.all([
-          this.canSendToConversation(c.id, organizationId),
-          this.getWindowSecondsRemaining(c.id, organizationId),
-        ]);
-        return { ...c, canSend, windowSecondsRemaining };
-      }),
-    );
-    return result;
+    return list.map((c) => ({
+      ...c,
+      canSend: this.window24h.canSendFreeMessage(c.lastUserMessageAt),
+      windowSecondsRemaining: this.window24h.getSecondsRemaining(c.lastUserMessageAt),
+    }));
   }
 
   async getMessages(
@@ -456,7 +459,7 @@ export class ChatService {
     }
 
     const lastMsg = c.messages[0];
-    const unreadCount = await this.getUnreadCount(conversationId);
+    const unreadCount = await this.getUnreadCount(conversationId, c.lastReadAt);
     let lastMessagePreview = lastMsg?.body.slice(0, 80) ?? '';
     if (lastMsg && !lastMessagePreview) {
       if (lastMsg.type === MessageType.IMAGE) lastMessagePreview = '📷 Imagen';
