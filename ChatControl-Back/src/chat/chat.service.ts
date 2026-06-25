@@ -1,15 +1,16 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { MessageDirection, MessageStatus, MessageType, Prisma } from '@prisma/client';
+import { MessageDirection, MessageStatus, MessageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { Window24hService } from '../common/window-24h.service';
 import { AiService } from '../ai/ai.service';
 import { SettingsService } from '../settings/settings.service';
 import { ChatGateway } from './chat.gateway';
-import { LeadAssignmentService } from '../lead-assignment/lead-assignment.service';
-import { IntegrationsService } from '../integrations/integrations.service';
+import { LeadDetectionService } from '../lead-assignment/lead-detection.service';
 import { StorageService } from '../common/storage.service';
+import { normalizePhone } from '../common/text-similarity.util';
+import { ConversationsQueryService } from './conversations-query.service';
 
 export interface Message {
   id: string;
@@ -40,20 +41,6 @@ export interface Conversation {
   isNewLead?: boolean;
 }
 
-function normalizePhone(phone: string): string {
-  return phone.replace(/\D/g, '');
-}
-
-function normalizeMessageText(text: string): string {
-  return text
-    .replace(/\s+/g, ' ')
-    .replace(/\n+/g, ' ')
-    .replace(/\u00A0/g, ' ')
-    .replace(/[^\w\s\u00C0-\u024F]/g, '')
-    .trim()
-    .toLowerCase();
-}
-
 @Injectable()
 export class ChatService {
   constructor(
@@ -64,9 +51,9 @@ export class ChatService {
     private readonly settings: SettingsService,
     private readonly chatGateway: ChatGateway,
     private readonly config: ConfigService,
-    private readonly leadAssignment: LeadAssignmentService,
-    private readonly integrations: IntegrationsService,
+    private readonly leadDetection: LeadDetectionService,
     private readonly storage: StorageService,
+    private readonly conversationsQuery: ConversationsQueryService,
   ) {}
 
   async registerIncomingMessage(payload: {
@@ -165,7 +152,7 @@ export class ChatService {
       });
 
       if (isNewConversation && payload.type === MessageType.TEXT) {
-        await this.tryAutoDetectAndAssign(conversation.id, payload.organizationId, payload.text);
+        await this.leadDetection.tryAutoDetectAndAssign(conversation.id, payload.organizationId, payload.text);
       }
 
       this.chatGateway.emitNewMessage(
@@ -186,61 +173,6 @@ export class ChatService {
     }
   }
 
-  private async tryAutoDetectAndAssign(
-    conversationId: string,
-    organizationId: string,
-    messageText: string,
-  ): Promise<void> {
-    try {
-      const config = await this.integrations.getLeadDetectionConfig(organizationId);
-      if (!config.enabled || !config.autoMessage) return;
-
-      const normalizedReceived = normalizeMessageText(messageText);
-      const normalizedConfigured = normalizeMessageText(config.autoMessage);
-
-      if (normalizedReceived.length < 10 || normalizedConfigured.length < 10) return;
-
-      const similarity = this.computeSimilarity(normalizedReceived, normalizedConfigured);
-      if (similarity < 0.75) return;
-
-      await this.prisma.conversation.update({
-        where: { id: conversationId },
-        data: {
-          autoMessageDetectedAt: new Date(),
-          isNewLead: true,
-        },
-      });
-
-      await this.leadAssignment.assignNewLead(conversationId, organizationId);
-    } catch (error) {
-      // Silently fail - lead detection should never break message reception
-    }
-  }
-
-  private computeSimilarity(a: string, b: string): number {
-    const longer = a.length > b.length ? a : b;
-    const shorter = a.length > b.length ? b : a;
-    if (longer.length === 0) return 1.0;
-    const editDist = this.levenshteinDistance(longer, shorter);
-    return 1.0 - editDist / longer.length;
-  }
-
-  private levenshteinDistance(a: string, b: string): number {
-    const matrix: number[][] = [];
-    for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-    for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-    for (let i = 1; i <= b.length; i++) {
-      for (let j = 1; j <= a.length; j++) {
-        const cost = a[j - 1] === b[i - 1] ? 0 : 1;
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j - 1] + cost,
-        );
-      }
-    }
-    return matrix[b.length][a.length];
-  }
 
   private async assertConversationInOrg(conversationId: string, organizationId: string): Promise<void> {
     const c = await this.prisma.conversation.findFirst({
@@ -255,74 +187,7 @@ export class ChatService {
     userId?: string,
     userRole?: string,
   ): Promise<Conversation[]> {
-    const where: any = { contact: { organizationId } };
-
-    if (userRole === 'AGENT' && userId) {
-      where.assignedToUserId = userId;
-    }
-
-    const list = await this.prisma.conversation.findMany({
-      where,
-      include: {
-        contact: true,
-        messages: {
-          orderBy: { whatsappTimestamp: 'desc' },
-          take: 1,
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    const unreadCounts = await this.getUnreadCountsBulk(list.map((c) => c.id));
-    const withUnread = list.map((c) => {
-      const lastMsg = c.messages[0];
-      const unreadCount = unreadCounts.get(c.id) ?? 0;
-      let lastMessagePreview = lastMsg?.body.slice(0, 80) ?? '';
-      if (lastMsg && !lastMessagePreview) {
-        if (lastMsg.type === MessageType.IMAGE) lastMessagePreview = '📷 Imagen';
-        else if (lastMsg.type === MessageType.VIDEO) lastMessagePreview = '🎥 Video';
-        else if (lastMsg.type === MessageType.AUDIO) lastMessagePreview = '🎵 Audio';
-        else if (lastMsg.type === MessageType.DOCUMENT) lastMessagePreview = '📄 Documento';
-      }
-      return {
-        id: c.id,
-        phone: c.contact.phone,
-        name: c.contact.name ?? undefined,
-        email: c.contact.email ?? undefined,
-        contactId: c.contact.id,
-        isSandboxAuthorized: c.contact.isSandboxAuthorized,
-        lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
-        lastMessagePreview,
-        lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
-        unreadCount,
-        assignedToUserId: c.assignedToUserId,
-        isNewLead: c.isNewLead,
-      };
-    });
-    return withUnread.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
-  }
-
-  private async getUnreadCountsBulk(conversationIds: string[]): Promise<Map<string, number>> {
-    if (conversationIds.length === 0) return new Map();
-    const rows = await this.prisma.$queryRaw<{ conversationId: string; unreadCount: bigint }[]>`
-      SELECT m."conversationId" as "conversationId", COUNT(*)::bigint as "unreadCount"
-      FROM "Message" m
-      JOIN "Conversation" c ON c.id = m."conversationId"
-      WHERE m."conversationId" IN (${Prisma.join(conversationIds)})
-        AND m.direction = 'IN'::"MessageDirection"
-        AND m."whatsappTimestamp" > COALESCE(c."lastReadAt", to_timestamp(0))
-      GROUP BY m."conversationId"
-    `;
-    return new Map(rows.map((r) => [r.conversationId, Number(r.unreadCount)]));
-  }
-
-  private async getUnreadCount(conversationId: string, lastReadAt: Date | null): Promise<number> {
-    return this.prisma.message.count({
-      where: {
-        conversationId,
-        direction: MessageDirection.IN,
-        whatsappTimestamp: { gt: lastReadAt ?? new Date(0) },
-      },
-    });
+    return this.conversationsQuery.getConversations(organizationId, userId, userRole);
   }
 
   async markConversationAsRead(conversationId: string, organizationId: string): Promise<void> {
@@ -442,45 +307,7 @@ export class ChatService {
     userId?: string,
     userRole?: string,
   ): Promise<Conversation | undefined> {
-    const c = await this.prisma.conversation.findFirst({
-      where: { id: conversationId, contact: { organizationId } },
-      include: {
-        contact: true,
-        messages: {
-          orderBy: { whatsappTimestamp: 'desc' },
-          take: 1,
-        },
-      },
-    });
-    if (!c) return undefined;
-
-    if (userRole === 'AGENT' && userId && c.assignedToUserId !== userId) {
-      return undefined;
-    }
-
-    const lastMsg = c.messages[0];
-    const unreadCount = await this.getUnreadCount(conversationId, c.lastReadAt);
-    let lastMessagePreview = lastMsg?.body.slice(0, 80) ?? '';
-    if (lastMsg && !lastMessagePreview) {
-      if (lastMsg.type === MessageType.IMAGE) lastMessagePreview = '📷 Imagen';
-      else if (lastMsg.type === MessageType.VIDEO) lastMessagePreview = '🎥 Video';
-      else if (lastMsg.type === MessageType.AUDIO) lastMessagePreview = '🎵 Audio';
-      else if (lastMsg.type === MessageType.DOCUMENT) lastMessagePreview = '📄 Documento';
-    }
-    return {
-      id: c.id,
-      phone: c.contact.phone,
-      name: c.contact.name ?? undefined,
-      email: c.contact.email ?? undefined,
-      contactId: c.contact.id,
-      isSandboxAuthorized: c.contact.isSandboxAuthorized,
-      lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
-      lastMessagePreview,
-      lastMessageAt: lastMsg?.whatsappTimestamp.getTime() ?? c.createdAt.getTime(),
-      unreadCount,
-      assignedToUserId: c.assignedToUserId,
-      isNewLead: c.isNewLead,
-    };
+    return this.conversationsQuery.getConversation(conversationId, organizationId, userId, userRole);
   }
 
   async canSendToConversation(conversationId: string, organizationId: string): Promise<boolean> {
@@ -503,15 +330,9 @@ export class ChatService {
     return c?.lastUserMessageAt ?? null;
   }
 
-  async sendMessage(params: {
-    organizationId: string;
-    conversationId: string;
-    text: string;
-    fromAi?: boolean;
-    sentByUserId?: string | null;
-  }): Promise<Message> {
+  private async assertCanSendAndGetConversation(organizationId: string, conversationId: string) {
     const conv = await this.prisma.conversation.findFirst({
-      where: { id: params.conversationId, contact: { organizationId: params.organizationId } },
+      where: { id: conversationId, contact: { organizationId } },
       include: { contact: true },
     });
     if (!conv) throw new BadRequestException('Conversación no encontrada');
@@ -521,7 +342,18 @@ export class ChatService {
         'Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.',
       );
     }
-    await this.settings.checkDailyLimitOrThrow(params.conversationId, params.organizationId);
+    await this.settings.checkDailyLimitOrThrow(conversationId, organizationId);
+    return conv;
+  }
+
+  async sendMessage(params: {
+    organizationId: string;
+    conversationId: string;
+    text: string;
+    fromAi?: boolean;
+    sentByUserId?: string | null;
+  }): Promise<Message> {
+    const conv = await this.assertCanSendAndGetConversation(params.organizationId, params.conversationId);
     const lastUserMessageAt = conv.lastUserMessageAt ? new Date(conv.lastUserMessageAt) : null;
     const { messageId } = await this.whatsapp.sendTextMessage(params.organizationId, {
       to: conv.contact.phone,
@@ -563,19 +395,7 @@ export class ChatService {
     fileName?: string;
     sentByUserId?: string | null;
   }): Promise<Message> {
-    const conv = await this.prisma.conversation.findFirst({
-      where: { id: params.conversationId, contact: { organizationId: params.organizationId } },
-      include: { contact: true },
-    });
-    if (!conv) throw new BadRequestException('Conversación no encontrada');
-
-    const isSandbox = this.config.get<string>('WHATSAPP_SANDBOX', 'true') === 'true';
-    if (isSandbox && !conv.contact.isSandboxAuthorized) {
-      throw new ForbiddenException(
-        'Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.',
-      );
-    }
-    await this.settings.checkDailyLimitOrThrow(params.conversationId, params.organizationId);
+    const conv = await this.assertCanSendAndGetConversation(params.organizationId, params.conversationId);
     const lastUserMessageAt = conv.lastUserMessageAt ? new Date(conv.lastUserMessageAt) : null;
 
     const msgType = params.mimeType.startsWith('image/') ? MessageType.IMAGE
@@ -631,18 +451,7 @@ export class ChatService {
     type: MessageType;
     sentByUserId?: string | null;
   }): Promise<Message> {
-    const conv = await this.prisma.conversation.findFirst({
-      where: { id: params.conversationId, contact: { organizationId: params.organizationId } },
-      include: { contact: true },
-    });
-    if (!conv) throw new BadRequestException('Conversación no encontrada');
-    const isSandbox = this.config.get<string>('WHATSAPP_SANDBOX', 'true') === 'true';
-    if (isSandbox && !conv.contact.isSandboxAuthorized) {
-      throw new ForbiddenException(
-        'Este número no está autorizado en Meta (sandbox). Agrégalo en Contactos y márcalo como autorizado.',
-      );
-    }
-    await this.settings.checkDailyLimitOrThrow(params.conversationId, params.organizationId);
+    const conv = await this.assertCanSendAndGetConversation(params.organizationId, params.conversationId);
 
     const timestamp = Date.now();
     const path = `chats/${params.organizationId}/sent_${timestamp}_${params.file.originalname}`;

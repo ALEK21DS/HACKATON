@@ -4,13 +4,13 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
 import { ChatGateway } from './chat.gateway';
+import { ConversationsQueryService } from './conversations-query.service';
 import { AuthModule } from '../auth/auth.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { AiModule } from '../ai/ai.module';
 import { SettingsModule } from '../settings/settings.module';
 import { LeadAssignmentModule } from '../lead-assignment/lead-assignment.module';
-import { IntegrationsModule } from '../integrations/integrations.module';
 
 @Module({
   imports: [
@@ -27,10 +27,9 @@ import { IntegrationsModule } from '../integrations/integrations.module';
     AiModule,
     SettingsModule,
     forwardRef(() => LeadAssignmentModule),
-    IntegrationsModule,
   ],
   controllers: [ChatController],
-  providers: [ChatService, ChatGateway],
+  providers: [ChatService, ChatGateway, ConversationsQueryService],
   exports: [ChatService, ChatGateway],
 })
 export class ChatModule {}
