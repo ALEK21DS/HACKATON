@@ -10,6 +10,11 @@ import { ChatGateway } from './chat.gateway';
 import { LeadAssignmentService } from '../lead-assignment/lead-assignment.service';
 import { IntegrationsService } from '../integrations/integrations.service';
 import { StorageService } from '../common/storage.service';
+import {
+  normalizePhone,
+  normalizeMessageText,
+  computeSimilarity,
+} from '../common/text-similarity.util';
 
 export interface Message {
   id: string;
@@ -38,20 +43,6 @@ export interface Conversation {
   unreadCount: number;
   assignedToUserId?: string | null;
   isNewLead?: boolean;
-}
-
-function normalizePhone(phone: string): string {
-  return phone.replace(/\D/g, '');
-}
-
-function normalizeMessageText(text: string): string {
-  return text
-    .replace(/\s+/g, ' ')
-    .replace(/\n+/g, ' ')
-    .replace(/\u00A0/g, ' ')
-    .replace(/[^\w\s\u00C0-\u024F]/g, '')
-    .trim()
-    .toLowerCase();
 }
 
 @Injectable()
@@ -200,7 +191,7 @@ export class ChatService {
 
       if (normalizedReceived.length < 10 || normalizedConfigured.length < 10) return;
 
-      const similarity = this.computeSimilarity(normalizedReceived, normalizedConfigured);
+      const similarity = computeSimilarity(normalizedReceived, normalizedConfigured);
       if (similarity < 0.75) return;
 
       await this.prisma.conversation.update({
@@ -215,31 +206,6 @@ export class ChatService {
     } catch (error) {
       // Silently fail - lead detection should never break message reception
     }
-  }
-
-  private computeSimilarity(a: string, b: string): number {
-    const longer = a.length > b.length ? a : b;
-    const shorter = a.length > b.length ? b : a;
-    if (longer.length === 0) return 1.0;
-    const editDist = this.levenshteinDistance(longer, shorter);
-    return 1.0 - editDist / longer.length;
-  }
-
-  private levenshteinDistance(a: string, b: string): number {
-    const matrix: number[][] = [];
-    for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-    for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-    for (let i = 1; i <= b.length; i++) {
-      for (let j = 1; j <= a.length; j++) {
-        const cost = a[j - 1] === b[i - 1] ? 0 : 1;
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j - 1] + cost,
-        );
-      }
-    }
-    return matrix[b.length][a.length];
   }
 
   private async assertConversationInOrg(conversationId: string, organizationId: string): Promise<void> {
