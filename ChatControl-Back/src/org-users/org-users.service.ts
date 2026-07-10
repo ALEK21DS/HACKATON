@@ -77,11 +77,36 @@ export class OrgUsersService {
       throw new BadRequestException('El usuario ya está inactivo');
     }
 
+    // 1. Remove user from the round-robin agents list
+    const configuredIds = await this.integrations.getLeadAssignmentAgents(organizationId);
+    if (configuredIds.includes(targetUserId)) {
+      await this.integrations.updateLeadAssignmentAgents(
+        organizationId,
+        configuredIds.filter((id) => id !== targetUserId),
+      );
+    }
+
+    // 2. Mark user as inactive so getNextAgentInTurn skips them
+    await this.prisma.user.update({
+      where: { id: targetUserId },
+      data: { isActive: false },
+    });
+
+    // 3. Find conversations assigned to this user
     const assignedConversations = await this.prisma.conversation.findMany({
       where: { assignedToUserId: targetUserId, contact: { organizationId } },
       select: { id: true },
     });
 
+    // 4. Clear assignments so assignNewLead sees them as unassigned
+    if (assignedConversations.length > 0) {
+      await this.prisma.conversation.updateMany({
+        where: { id: { in: assignedConversations.map(c => c.id) } },
+        data: { assignedToUserId: null },
+      });
+    }
+
+    // 5. Reassign each conversation via round-robin
     for (const conv of assignedConversations) {
       const result = await this.leadAssignment.assignNewLead(conv.id, organizationId);
       if (result.assignedToUserId) {
@@ -97,6 +122,7 @@ export class OrgUsersService {
       }
     }
 
+    // 6. Clear related broadcast and CRM links
     await this.prisma.broadcastList.updateMany({
       where: { assignedToUserId: targetUserId },
       data: { assignedToUserId: null },
@@ -105,19 +131,6 @@ export class OrgUsersService {
     await this.prisma.crmContactLink.updateMany({
       where: { assignedToUserId: targetUserId },
       data: { assignedToUserId: null },
-    });
-
-    const configuredIds = await this.integrations.getLeadAssignmentAgents(organizationId);
-    if (configuredIds.includes(targetUserId)) {
-      await this.integrations.updateLeadAssignmentAgents(
-        organizationId,
-        configuredIds.filter((id) => id !== targetUserId),
-      );
-    }
-
-    await this.prisma.user.update({
-      where: { id: targetUserId },
-      data: { isActive: false },
     });
 
     return {
