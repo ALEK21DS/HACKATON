@@ -11,6 +11,7 @@ import {
   updateLeadAssignmentEnabled,
   getLeadAssignmentAgents,
   updateLeadAssignmentAgents,
+  getNextAgent,
 } from '@/lib/api';
 
 type AgentInTurn = {
@@ -82,6 +83,7 @@ export default function AssignmentPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
 
+  const [nextAgentId, setNextAgentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -117,6 +119,9 @@ export default function AssignmentPage() {
           .filter((a): a is AgentInTurn => a !== null);
 
         setAssignedAgents(mappedAgents);
+
+        const next = await getNextAgent();
+        setNextAgentId(next?.id ?? null);
       } catch (err) {
         console.error('Error fetching assignment config', err);
       } finally {
@@ -266,6 +271,11 @@ export default function AssignmentPage() {
                       </div>
                       <div style={{ flex: 1 }}>
                         <span style={{ fontSize: '1rem', fontWeight: 700, color: '#F2F2F2' }}>{agent.displayName || 'Agente'}</span>
+                        {nextAgentId === agent.id && (
+                          <span style={{ marginLeft: '0.6rem', fontSize: '0.55rem', fontWeight: 900, color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '2px 8px', background: 'rgba(239,68,68,0.1)', borderRadius: '6px' }}>
+                            ⚡ Siguiente
+                          </span>
+                        )}
                         <span style={{ fontSize: '0.75rem', color: '#666', marginLeft: '1rem' }}>{agent.email}</span>
                       </div>
                       <button onClick={() => removeAgent(agent.id)} style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer' }}><TrashIcon /></button>
