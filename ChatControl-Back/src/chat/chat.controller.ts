@@ -21,6 +21,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { OrgMemberGuard } from '../auth/org-member.guard';
 import { ChatService } from './chat.service';
 import { StorageService } from '../common/storage.service';
+import { LeadAssignmentService } from '../lead-assignment/lead-assignment.service';
 import { IsNotEmpty, IsString, IsOptional } from 'class-validator';
 
 class SendMessageDto {
@@ -42,6 +43,7 @@ export class ChatController {
   constructor(
     private readonly chat: ChatService,
     private readonly storage: StorageService,
+    private readonly leadAssignment: LeadAssignmentService,
   ) {}
 
   @Get('conversations')
@@ -141,6 +143,12 @@ export class ChatController {
   async generateReply(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const { text, usedFallbackModel } = await this.chat.generateAiReply(user.organizationId!, id);
     return { ok: true, text, usedFallbackModel };
+  }
+
+  @Post('conversations/backfill-assignment')
+  @Roles(UserRole.ORG_ADMIN)
+  async backfillAssignment(@CurrentUser() user: AuthUser) {
+    return this.leadAssignment.assignHistoricalChats(user.organizationId!);
   }
 
   @Post('conversations/:id/assign')

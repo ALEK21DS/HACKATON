@@ -16,9 +16,8 @@ export interface UpdateIntegrationsDto {
   geminiApiKey?: string;
 }
 
-export interface LeadDetectionConfigDto {
-  enabled: boolean;
-  autoMessage: string;
+export interface LeadAssignmentAgentsDto {
+  agentIds: string[];
 }
 
 @Injectable()
@@ -105,21 +104,28 @@ export class IntegrationsService {
     });
   }
 
-  async getLeadDetectionConfig(organizationId: string): Promise<LeadDetectionConfigDto> {
-    const enabled = await this.getSetting(organizationId, 'lead_detection_enabled');
-    const autoMessage = await this.getSetting(organizationId, 'lead_detection_message');
-    return {
-      enabled: enabled === 'true',
-      autoMessage: autoMessage ?? '',
-    };
+  async getLeadAssignmentEnabled(organizationId: string): Promise<boolean> {
+    const val = await this.getSetting(organizationId, 'lead_assignment_enabled');
+    return val !== 'false';
   }
 
-  async updateLeadDetectionConfig(
-    organizationId: string,
-    config: LeadDetectionConfigDto,
-  ): Promise<LeadDetectionConfigDto> {
-    await this.setSetting(organizationId, 'lead_detection_enabled', config.enabled ? 'true' : 'false');
-    await this.setSetting(organizationId, 'lead_detection_message', config.autoMessage);
-    return config;
+  async updateLeadAssignmentEnabled(organizationId: string, enabled: boolean): Promise<void> {
+    await this.setSetting(organizationId, 'lead_assignment_enabled', enabled ? 'true' : 'false');
+  }
+
+  async getLeadAssignmentAgents(organizationId: string): Promise<string[]> {
+    const raw = await this.getSetting(organizationId, 'lead_assignment_agents');
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter((id): id is string => typeof id === 'string');
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  async updateLeadAssignmentAgents(organizationId: string, agentIds: string[]): Promise<void> {
+    await this.setSetting(organizationId, 'lead_assignment_agents', JSON.stringify(agentIds));
   }
 }

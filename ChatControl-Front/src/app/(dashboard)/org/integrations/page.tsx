@@ -9,10 +9,7 @@ import {
   getMe,
   getIntegrationStatus,
   updateIntegrations,
-  getLeadDetectionConfig,
-  updateLeadDetectionConfig,
   type IntegrationStatus,
-  type LeadDetectionConfig,
 } from '@/lib/api';
 
 function MetaIcon({ className }: { className?: string }) {
@@ -51,14 +48,6 @@ function EyeOffIcon({ className }: { className?: string }) {
   );
 }
 
-function RobotIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M12 2a2 2 0 0 1 2 2v2h2a2 2 0 0 1 2 2v2h2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h2V8a2 2 0 0 1 2-2h2V4a2 2 0 0 1 2-2zm0 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6 12v4h12v-4H6z"/>
-    </svg>
-  );
-}
-
 function BackIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -70,7 +59,6 @@ function BackIcon() {
 export default function IntegrationsPage() {
   const router = useRouter();
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
-  const [leadConfig, setLeadConfig] = useState<LeadDetectionConfig>({ enabled: false, autoMessage: '' });
   const [waToken, setWaToken] = useState('');
   const [waPhoneId, setWaPhoneId] = useState('');
   const [waWaba, setWaWaba] = useState('');
@@ -78,7 +66,6 @@ export default function IntegrationsPage() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
-  const [savingLead, setSavingLead] = useState(false);
   const [savingIntegrations, setSavingIntegrations] = useState(false);
 
   const [showWaToken, setShowWaToken] = useState(false);
@@ -101,7 +88,6 @@ export default function IntegrationsPage() {
         if (s.whatsappPhoneNumberId) {
           setWaPhoneId(s.whatsappPhoneNumberId);
         }
-        setLeadConfig(await getLeadDetectionConfig());
       } catch {
         router.replace('/login');
       } finally {
@@ -130,21 +116,6 @@ export default function IntegrationsPage() {
       setErr(e instanceof Error ? e.message : 'Error al guardar');
     } finally {
       setSavingIntegrations(false);
-    }
-  }
-
-  async function handleSaveLeadDetection() {
-    setErr('');
-    setMsg('');
-    setSavingLead(true);
-    try {
-      const next = await updateLeadDetectionConfig(leadConfig);
-      setLeadConfig(next);
-      setMsg('Configuración de detección de leads guardada correctamente.');
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Error al guardar detección de leads');
-    } finally {
-      setSavingLead(false);
     }
   }
 
@@ -508,198 +479,6 @@ export default function IntegrationsPage() {
           {savingIntegrations ? <><Spinner /> Guardando...</> : 'Guardar Integraciones'}
         </button>
       </form>
-
-      {/* ── Lead Detection Section ── */}
-      <div style={{
-        background: 'rgba(255,255,255,0.02)',
-        border: '1px solid rgba(64,64,64,0.3)',
-        borderRadius: 16,
-        padding: '1.5rem',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-          <div style={{ padding: '0.5rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 10, color: '#EF4444' }}>
-            <RobotIcon className="w-5 h-5" />
-          </div>
-          <div style={{ flex: 1 }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#F2F2F2', margin: 0 }}>
-              Detección Automática de Nuevos Leads
-            </h3>
-          </div>
-          <div
-            onClick={() => setLeadConfig(prev => ({ ...prev, enabled: !prev.enabled }))}
-            style={{
-              width: '64px',
-              height: '32px',
-              borderRadius: '16px',
-              background: leadConfig.enabled ? '#EF4444' : '#1A1A1A',
-              position: 'relative',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              boxShadow: leadConfig.enabled ? '0 0 20px rgba(239, 68, 68, 0.4)' : 'none',
-              flexShrink: 0,
-            }}
-            role="switch"
-            aria-checked={leadConfig.enabled}
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setLeadConfig(prev => ({ ...prev, enabled: !prev.enabled }));
-              }
-            }}
-          >
-            <div style={{
-              width: '24px',
-              height: '24px',
-              borderRadius: '50%',
-              background: 'white',
-              position: 'absolute',
-              top: '4px',
-              left: leadConfig.enabled ? '36px' : '4px',
-              transition: 'all 0.3s ease',
-            }} />
-          </div>
-        </div>
-
-        <p style={{ color: '#8C8C8C', fontSize: '0.85rem', marginBottom: '1.5rem', lineHeight: '1.5' }}>
-          Configura el mensaje automático enviado por Wasaho para detectar nuevos contactos y ejecutar la asignación automática de conversaciones.
-        </p>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
-          <label style={{ fontSize: '0.8rem', color: '#8C8C8C', fontWeight: 600, textTransform: 'uppercase' }}>
-            Mensaje de detección
-          </label>
-          <textarea
-            value={leadConfig.autoMessage}
-            onChange={(e) => setLeadConfig(prev => ({ ...prev, autoMessage: e.target.value }))}
-            placeholder="Pega aquí el mensaje automático que envía Wasaho a los nuevos contactos..."
-            rows={4}
-            style={{
-              width: '100%',
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(64,64,64,0.3)',
-              borderRadius: 10,
-              padding: '0.85rem 1rem',
-              color: '#F2F2F2',
-              outline: 'none',
-              fontSize: '0.9rem',
-              resize: 'vertical',
-              fontFamily: 'inherit',
-              opacity: leadConfig.enabled ? 1 : 0.4,
-              boxSizing: 'border-box',
-            }}
-            disabled={!leadConfig.enabled}
-          />
-          <span style={{ fontSize: '0.7rem', color: '#666' }}>
-            Copia exactamente el mismo mensaje automático configurado en Wasaho. Cuando un nuevo contacto lo reciba, el sistema lo detectará y asignará automáticamente a un agente disponible.
-          </span>
-        </div>
-
-        {/* ── Live Preview ── */}
-        {leadConfig.enabled && leadConfig.autoMessage.trim() && (
-          <div style={{
-            marginBottom: '1.5rem',
-            background: '#040404',
-            border: '1px solid rgba(64,64,64,0.3)',
-            borderRadius: 12,
-            padding: '1.25rem',
-          }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              marginBottom: '0.75rem',
-            }}>
-              <div style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: '#4ADE80',
-                boxShadow: '0 0 8px rgba(74, 222, 128, 0.5)',
-              }} />
-              <span style={{
-                fontSize: '0.65rem',
-                color: '#8C8C8C',
-                fontWeight: 800,
-                textTransform: 'uppercase',
-                letterSpacing: '0.1em',
-              }}>
-                Vista previa del mensaje detectado
-              </span>
-            </div>
-            <div style={{
-              background: 'rgba(255,255,255,0.03)',
-              borderRadius: 8,
-              padding: '1rem',
-              color: '#F2F2F2',
-              fontSize: '0.9rem',
-              lineHeight: '1.6',
-              whiteSpace: 'pre-wrap',
-              fontFamily: '"Inter", sans-serif',
-              borderLeft: '3px solid #EF4444',
-            }}>
-              {leadConfig.autoMessage}
-            </div>
-            <div style={{
-              marginTop: '0.75rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontSize: '0.7rem',
-              color: '#666',
-            }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="16" x2="12" y2="12" />
-                <line x1="12" y1="8" x2="12.01" y2="8" />
-              </svg>
-              <span>
-                El sistema comparará este texto con cada mensaje entrante usando similitud inteligente (≥ 75%).
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* ── Empty state when no message configured ── */}
-        {leadConfig.enabled && !leadConfig.autoMessage.trim() && (
-          <div style={{
-            marginBottom: '1.5rem',
-            padding: '1.25rem',
-            background: 'rgba(239, 68, 68, 0.03)',
-            border: '1px dashed rgba(239, 68, 68, 0.2)',
-            borderRadius: 12,
-            textAlign: 'center',
-          }}>
-            <p style={{ color: '#8C8C8C', fontSize: '0.85rem', margin: 0 }}>
-              Escribe o pega el mensaje automático de Wasaho para activar la detección.
-            </p>
-          </div>
-        )}
-
-        <button
-          onClick={handleSaveLeadDetection}
-          disabled={!leadConfig.enabled || !leadConfig.autoMessage.trim() || savingLead}
-          style={{
-            padding: '0.85rem 2rem',
-            background: leadConfig.enabled && leadConfig.autoMessage.trim()
-              ? 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)'
-              : '#1A1A1A',
-            border: 'none',
-            borderRadius: 12,
-            color: leadConfig.enabled && leadConfig.autoMessage.trim() ? 'white' : '#444',
-            fontSize: '0.85rem',
-            fontWeight: 800,
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            cursor: leadConfig.enabled && leadConfig.autoMessage.trim() && !savingLead ? 'pointer' : 'not-allowed',
-            boxShadow: leadConfig.enabled && leadConfig.autoMessage.trim() ? '0 4px 15px rgba(239, 68, 68, 0.3)' : 'none',
-            transition: 'all 0.2s ease',
-            alignSelf: 'flex-start',
-          }}
-        >
-          {savingLead ? 'Guardando...' : 'Guardar Configuración'}
-        </button>
-      </div>
 
       <style jsx>{`
         .page-container {

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../chat/chat.gateway';
+import { IntegrationsService } from '../integrations/integrations.service';
 
 export interface AssignedResult {
   conversationId: string;
@@ -16,6 +17,7 @@ export class LeadAssignmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly chatGateway: ChatGateway,
+    private readonly integrations: IntegrationsService,
   ) {}
 
   async assignNewLead(conversationId: string, organizationId: string): Promise<AssignedResult> {
@@ -46,13 +48,48 @@ export class LeadAssignmentService {
     return { conversationId, assignedToUserId: nextAgentId, isNewAssignment: true };
   }
 
-  private async getNextAgentInTurn(organizationId: string): Promise<string | null> {
-    const agents = await this.prisma.user.findMany({
+  async tryAutoAssignNewLead(conversationId: string, organizationId: string): Promise<AssignedResult> {
+    const enabled = await this.integrations.getLeadAssignmentEnabled(organizationId);
+    if (!enabled) {
+      return { conversationId, assignedToUserId: null, isNewAssignment: false };
+    }
+    return this.assignNewLead(conversationId, organizationId);
+  }
+
+  async assignHistoricalChats(organizationId: string): Promise<{ assigned: number; total: number }> {
+    const unassigned = await this.prisma.conversation.findMany({
       where: {
-        organizationId,
-        role: { in: [UserRole.ORG_ADMIN, UserRole.AGENT] },
+        contact: { organizationId },
+        assignedToUserId: null,
       },
+      orderBy: { createdAt: 'asc' },
       select: { id: true },
+    });
+    const total = unassigned.length;
+    let assigned = 0;
+    for (const conv of unassigned) {
+      const result = await this.assignNewLead(conv.id, organizationId);
+      if (result.isNewAssignment && result.assignedToUserId) assigned++;
+    }
+    return { assigned, total };
+  }
+
+  private async getNextAgentInTurn(organizationId: string): Promise<string | null> {
+    const configuredIds = await this.integrations.getLeadAssignmentAgents(organizationId);
+
+    const where: any = {
+      organizationId,
+      isActive: true,
+      role: { in: [UserRole.ORG_ADMIN, UserRole.AGENT] },
+    };
+    if (configuredIds.length > 0) {
+      where.id = { in: configuredIds };
+    }
+
+    const agents = await this.prisma.user.findMany({
+      where,
+      select: { id: true },
+      orderBy: { displayName: 'asc' },
     });
 
     if (agents.length === 0) return null;

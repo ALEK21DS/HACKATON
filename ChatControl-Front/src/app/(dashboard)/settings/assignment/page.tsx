@@ -7,15 +7,16 @@ import {
   isLoggedIn,
   getMe,
   getOrgUsers,
-  getLeadDetectionConfig,
-  updateLeadDetectionConfig,
+  getLeadAssignmentEnabled,
+  updateLeadAssignmentEnabled,
+  getLeadAssignmentAgents,
+  updateLeadAssignmentAgents,
 } from '@/lib/api';
 
 type AgentInTurn = {
   id: string;
   email: string;
   displayName: string | null;
-  isNext: boolean;
 };
 
 // --- Icons ---
@@ -70,8 +71,9 @@ function SearchIcon() {
 export default function AssignmentPage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
-  const [isEnabled, setIsEnabled] = useState(false);
+
   const [allOrgUsers, setAllOrgUsers] = useState<any[]>([]);
+  const [isEnabled, setIsEnabled] = useState(true);
   const [assignedAgents, setAssignedAgents] = useState<AgentInTurn[]>([]);
   
   // Modal states
@@ -96,42 +98,25 @@ export default function AssignmentPage() {
         const users = await getOrgUsers();
         setAllOrgUsers(users);
 
-        // Cargar configuración de asignación del backend
-        const leadConfig = await getLeadDetectionConfig();
-        setIsEnabled(leadConfig.enabled);
+        const { enabled } = await getLeadAssignmentEnabled();
+        setIsEnabled(enabled);
 
-        if (leadConfig.autoMessage) {
-          try {
-            const parsed = JSON.parse(leadConfig.autoMessage);
-            const agentIds: string[] = parsed.agentIds || [];
-            const nextAgentId: string | null = parsed.nextAgentId || null;
+        const leadAssignment = await getLeadAssignmentAgents();
+        const agentIds: string[] = leadAssignment.agentIds || [];
 
-            const mappedAgents: AgentInTurn[] = agentIds
-              .map(id => {
-                const u = users.find((user: any) => user.id === id);
-                if (!u) return null;
-                return {
-                  id: u.id,
-                  email: u.email,
-                  displayName: u.displayName,
-                  isNext: u.id === nextAgentId,
-                };
-              })
-              .filter((a): a is AgentInTurn => a !== null);
+        const mappedAgents: AgentInTurn[] = agentIds
+          .map(id => {
+            const u = users.find((user: any) => user.id === id);
+            if (!u) return null;
+            return {
+              id: u.id,
+              email: u.email,
+              displayName: u.displayName,
+            };
+          })
+          .filter((a): a is AgentInTurn => a !== null);
 
-            // Si hay agentes asignados pero ninguno marcado como isNext, marcar el primero
-            if (mappedAgents.length > 0 && !mappedAgents.some(a => a.isNext)) {
-              mappedAgents[0].isNext = true;
-            }
-
-            setAssignedAgents(mappedAgents);
-          } catch (e) {
-            console.error('Error parsing lead config autoMessage', e);
-            setAssignedAgents([]);
-          }
-        } else {
-          setAssignedAgents([]);
-        }
+        setAssignedAgents(mappedAgents);
       } catch (err) {
         console.error('Error fetching assignment config', err);
       } finally {
@@ -146,20 +131,12 @@ export default function AssignmentPage() {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
-      isNext: assignedAgents.length === 0
     };
     setAssignedAgents([...assignedAgents, newAgent]);
-    // No cerramos el modal para permitir agregar múltiples rápidamente si se desea
   };
 
   const removeAgent = (id: string) => {
-    setAssignedAgents(prev => {
-      const filtered = prev.filter(a => a.id !== id);
-      if (prev.find(a => a.id === id)?.isNext && filtered.length > 0) {
-        filtered[0].isNext = true;
-      }
-      return filtered;
-    });
+    setAssignedAgents(prev => prev.filter(a => a.id !== id));
   };
 
   const moveAgent = (index: number, direction: 'up' | 'down') => {
@@ -168,10 +145,6 @@ export default function AssignmentPage() {
     if (targetIndex < 0 || targetIndex >= newAgents.length) return;
     [newAgents[index], newAgents[targetIndex]] = [newAgents[targetIndex], newAgents[index]];
     setAssignedAgents(newAgents);
-  };
-
-  const setNext = (id: string) => {
-    setAssignedAgents(prev => prev.map(a => ({ ...a, isNext: a.id === id })));
   };
 
   const [successMessage, setSuccessMessage] = useState('');
@@ -183,11 +156,8 @@ export default function AssignmentPage() {
     setErrorMessage('');
     try {
       const agentIds = assignedAgents.map(a => a.id);
-      const nextAgentId = assignedAgents.find(a => a.isNext)?.id || null;
-      await updateLeadDetectionConfig({
-        enabled: isEnabled,
-        autoMessage: JSON.stringify({ agentIds, nextAgentId }),
-      });
+      await updateLeadAssignmentEnabled(isEnabled);
+      await updateLeadAssignmentAgents(agentIds);
       setSuccessMessage('Configuración guardada con éxito.');
       setTimeout(() => setSuccessMessage(''), 4000);
     } catch (err: any) {
@@ -283,24 +253,22 @@ export default function AssignmentPage() {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {assignedAgents.map((agent, index) => (
-                  <div 
-                    key={agent.id}
-                    style={{ 
-                      display: 'flex', alignItems: 'center', gap: '1.5rem', padding: '1rem 1.25rem', background: agent.isNext ? 'rgba(239, 68, 68, 0.05)' : 'rgba(255,255,255,0.01)', 
-                      border: agent.isNext ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid rgba(255,255,255,0.05)', borderRadius: '16px'
-                    }}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <button onClick={() => moveAgent(index, 'up')} disabled={index === 0} style={{ background: 'none', border: 'none', color: index === 0 ? 'transparent' : '#444', cursor: 'pointer' }}><ArrowUpIcon /></button>
-                      <button onClick={() => moveAgent(index, 'down')} disabled={index === assignedAgents.length - 1} style={{ background: 'none', border: 'none', color: index === assignedAgents.length - 1 ? 'transparent' : '#444', cursor: 'pointer' }}><ArrowDownIcon /></button>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: '1rem', fontWeight: 700, color: '#F2F2F2' }}>{agent.displayName || 'Agente'}</span>
-                      <span style={{ fontSize: '0.75rem', color: '#666', marginLeft: '1rem' }}>{agent.email}</span>
-                    </div>
-                    {agent.isNext && <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#EF4444', textTransform: 'uppercase', padding: '4px 10px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '6px' }}>Próximo</span>}
-                    <button onClick={() => setNext(agent.id)} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#666', fontSize: '0.6rem', padding: '4px 8px', cursor: 'pointer' }}>Saltar turno</button>
-                    <button onClick={() => removeAgent(agent.id)} style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer' }}><TrashIcon /></button>
+                  <div
+                      key={agent.id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '1.5rem', padding: '1rem 1.25rem', background: 'rgba(255,255,255,0.01)',
+                        border: '1px solid rgba(255,255,255,0.05)', borderRadius: '16px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <button onClick={() => moveAgent(index, 'up')} disabled={index === 0} style={{ background: 'none', border: 'none', color: index === 0 ? 'transparent' : '#444', cursor: 'pointer' }}><ArrowUpIcon /></button>
+                        <button onClick={() => moveAgent(index, 'down')} disabled={index === assignedAgents.length - 1} style={{ background: 'none', border: 'none', color: index === assignedAgents.length - 1 ? 'transparent' : '#444', cursor: 'pointer' }}><ArrowDownIcon /></button>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ fontSize: '1rem', fontWeight: 700, color: '#F2F2F2' }}>{agent.displayName || 'Agente'}</span>
+                        <span style={{ fontSize: '0.75rem', color: '#666', marginLeft: '1rem' }}>{agent.email}</span>
+                      </div>
+                      <button onClick={() => removeAgent(agent.id)} style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer' }}><TrashIcon /></button>
                   </div>
                 ))}
               </div>

@@ -355,6 +355,43 @@ export class BroadcastService {
     });
   }
 
+  async getAssignmentAuditLogs(organizationId: string) {
+    const logs = await this.prisma.conversationAssignmentLog.findMany({
+      where: {
+        conversation: { contact: { organizationId } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    const userIds = new Set<string>();
+    for (const l of logs) {
+      if (l.fromUserId) userIds.add(l.fromUserId);
+      if (l.toUserId) userIds.add(l.toUserId);
+      userIds.add(l.reassignedByUserId);
+    }
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: [...userIds] } },
+      select: { id: true, email: true, displayName: true },
+    });
+    const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
+
+    return logs.map((l) => ({
+      ...l,
+      fromUser: l.fromUserId ? userMap[l.fromUserId] ?? null : null,
+      toUser: l.toUserId ? userMap[l.toUserId] ?? null : null,
+      reassignedBy: userMap[l.reassignedByUserId] ?? null,
+    }));
+  }
+
+  async getBroadcastAuditLogs(organizationId: string) {
+    return this.prisma.broadcastLog.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+  }
+
   private async logBroadcast(
     organizationId: string,
     userId: string | null,

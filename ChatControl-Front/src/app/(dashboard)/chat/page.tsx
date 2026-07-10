@@ -17,6 +17,7 @@ import {
   updateContact,
   generateReply,
   assignConversation,
+  backfillAssignments,
   sendMedia,
   getOrgUsers,
   type Conversation,
@@ -145,10 +146,13 @@ export default function ChatPage() {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const [orgUsers, setOrgUsers] = useState<Array<{ id: string; email: string; displayName: string | null; role: string }>>([]);
-  const [showAssignDropdown, setShowAssignDropdown] = useState(false);
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [assignSearch, setAssignSearch] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   
@@ -234,6 +238,10 @@ export default function ChatPage() {
 
     socket.on('conversation_assigned_to_me', (p: { conversationId: string }) => {
       loadConversations(false);
+      if (selectedIdRef.current !== p.conversationId) {
+        setToastMessage('Nuevo chat asignado');
+        setTimeout(() => setToastMessage(''), 5000);
+      }
       if (selectedIdRef.current === p.conversationId) {
         markConversationAsRead(p.conversationId);
       }
@@ -380,12 +388,39 @@ export default function ChatPage() {
     if (!selectedId) return;
     try {
       await assignConversation(selectedId, userId);
-      setShowAssignDropdown(false);
+      setAssignModalOpen(false);
+      setAssignSearch('');
       loadConversations(false);
     } catch (err) {}
   }
 
+  async function handleBackfill() {
+    setBackfilling(true);
+    try {
+      const result = await backfillAssignments();
+      if (result.total === 0) {
+        setToastMessage('No hay chats históricos sin asignar.');
+      } else {
+        setToastMessage(`Se asignaron ${result.assigned} de ${result.total} chats históricos.`);
+      }
+      setTimeout(() => setToastMessage(''), 5000);
+      loadConversations(false);
+    } catch (err) {
+      setToastMessage('Error al asignar chats históricos.');
+      setTimeout(() => setToastMessage(''), 5000);
+    } finally {
+      setBackfilling(false);
+    }
+  }
+
   const userRole = myUserRoleRef.current;
+
+  const filteredUsers = orgUsers
+    .filter(u => {
+      const q = assignSearch.toLowerCase();
+      return (u.displayName?.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+    })
+    .sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email));
 
   function renderStatus(status?: string) {
     if (!status || status === 'SENDING') return null;
@@ -455,6 +490,13 @@ export default function ChatPage() {
       
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+
+      {/* Toast de notificación */}
+      {toastMessage && (
+        <div style={{ position: 'fixed', top: '1.5rem', right: '1.5rem', zIndex: 9999, background: '#EF4444', color: '#FFF', padding: '0.75rem 1.5rem', borderRadius: '14px', fontSize: '0.85rem', fontWeight: 700, boxShadow: '0 10px 30px rgba(239, 68, 68, 0.4)', animation: 'fadeIn 0.3s ease' }}>
+          {toastMessage}
+        </div>
+      )}
 
       {/* ── Sidebar: Lista de Chats ── */}
       <aside className={`${styles.sidebar}${sidebarOpen ? ` ${styles.sidebarVisible}` : ''}`}>
@@ -562,29 +604,21 @@ export default function ChatPage() {
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', position: 'relative' }}>
                 {userRole === 'ORG_ADMIN' && (
-                  <div style={{ position: 'relative' }}>
+                  <>
                     <button
-                      onClick={() => setShowAssignDropdown(!showAssignDropdown)}
+                      onClick={() => setAssignModalOpen(true)}
                       style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', color: '#8C8C8C', padding: '0.6rem 1.2rem', borderRadius: '10px', fontSize: '0.65rem', fontWeight: 700, cursor: 'pointer', textTransform: 'uppercase' }}
                     >
                       {selectedConv?.assignedToUserId ? 'Reasignar' : 'Asignar'}
                     </button>
-                    {showAssignDropdown && (
-                      <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: '0.5rem', background: '#0D0D0D', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', minWidth: '250px', maxHeight: '300px', overflowY: 'auto', zIndex: 100, boxShadow: '0 20px 60px rgba(0,0,0,0.8)' }}>
-                        <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: '0.65rem', fontWeight: 800, color: '#444', textTransform: 'uppercase' }}>Asignar a:</div>
-                        <button onClick={() => handleAssign(null)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'none', border: 'none', color: '#666', fontSize: '0.85rem', cursor: 'pointer', textAlign: 'left', display: 'block' }}>
-                          Sin asignar
-                        </button>
-                        {orgUsers.map(u => (
-                          <button key={u.id} onClick={() => handleAssign(u.id)} style={{ width: '100%', padding: '0.75rem 1rem', background: selectedConv?.assignedToUserId === u.id ? 'rgba(239,68,68,0.08)' : 'none', border: 'none', color: '#F2F2F2', fontSize: '0.85rem', cursor: 'pointer', textAlign: 'left', display: 'block' }}>
-                            <span style={{ fontWeight: 700 }}>{u.displayName || u.email}</span>
-                            {selectedConv?.assignedToUserId === u.id && <span style={{ color: '#EF4444', marginLeft: '0.5rem', fontSize: '0.65rem' }}>✓</span>}
-                          </button>
-                        ))}
-                        {orgUsers.length === 0 && <div style={{ padding: '1rem', color: '#444', fontSize: '0.75rem', textAlign: 'center' }}>No hay usuarios disponibles</div>}
-                      </div>
-                    )}
-                  </div>
+                    <button
+                      onClick={handleBackfill}
+                      disabled={backfilling}
+                      style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', color: backfilling ? '#666' : '#EF4444', padding: '0.6rem 1.2rem', borderRadius: '10px', fontSize: '0.65rem', fontWeight: 700, cursor: backfilling ? 'not-allowed' : 'pointer', textTransform: 'uppercase' }}
+                    >
+                      {backfilling ? 'Asignando...' : 'Asignar todas'}
+                    </button>
+                  </>
                 )}
                 <button 
                   onClick={() => setDetailsOpen(!detailsOpen)}
@@ -1095,6 +1129,69 @@ export default function ChatPage() {
           to { opacity: 1; }
         }
       `}</style>
+
+      {/* Modal de asignación */}
+      {assignModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '2rem' }}
+          onClick={() => { setAssignModalOpen(false); setAssignSearch(''); }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#080808', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '28px', width: '100%', maxWidth: '500px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }}>
+            <div style={{ padding: '1.5rem 1.5rem 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 900, color: '#F2F2F2', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Seleccionar agente</h2>
+              <button onClick={() => { setAssignModalOpen(false); setAssignSearch(''); }} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '50%', width: '32px', height: '32px', color: '#8C8C8C', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem' }}>✕</button>
+            </div>
+            <div style={{ padding: '1rem 1.5rem', flexShrink: 0 }}>
+              <div style={{ position: 'relative' }}>
+                <svg style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#444', width: '1rem', height: '1rem' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+                </svg>
+                <input
+                  type="text"
+                  placeholder="Buscar por nombre o correo..."
+                  value={assignSearch}
+                  onChange={e => setAssignSearch(e.target.value)}
+                  autoFocus
+                  style={{ width: '100%', background: '#000', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '14px', padding: '0.85rem 1rem 0.85rem 3rem', color: '#F2F2F2', fontSize: '0.9rem', outline: 'none' }}
+                />
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem 1.5rem 1.5rem' }}>
+              <button
+                onClick={() => handleAssign(null)}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.02)', border: '1px solid transparent', borderRadius: '16px', color: '#666', fontSize: '0.9rem', cursor: 'pointer', textAlign: 'left', marginBottom: '0.25rem' }}
+              >
+                <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#444' }}>
+                  <svg style={{ width: '1.1rem', height: '1.1rem' }} viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                </div>
+                <span>Sin asignar</span>
+              </button>
+              {filteredUsers.map(u => {
+                const isCurrent = selectedConv?.assignedToUserId === u.id;
+                return (
+                  <button
+                    key={u.id}
+                    onClick={() => handleAssign(u.id)}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1rem', background: isCurrent ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.02)', border: isCurrent ? '1px solid rgba(239,68,68,0.2)' : '1px solid transparent', borderRadius: '16px', cursor: 'pointer', textAlign: 'left', marginBottom: '0.25rem', transition: 'all 0.2s' }}
+                    onMouseEnter={e => { if (!isCurrent) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                    onMouseLeave={e => { if (!isCurrent) e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; }}
+                  >
+                    <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: isCurrent ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isCurrent ? '#EF4444' : '#444' }}>
+                      <svg style={{ width: '1.1rem', height: '1.1rem' }} viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ display: 'block', fontSize: '0.9rem', color: '#F2F2F2', fontWeight: 600 }}>{u.displayName || 'Sin Nombre'}</span>
+                      <span style={{ fontSize: '0.75rem', color: '#666' }}>{u.email}</span>
+                    </div>
+                    {isCurrent && <span style={{ fontSize: '0.9rem', color: '#EF4444', fontWeight: 800 }}>✓</span>}
+                  </button>
+                );
+              })}
+              {filteredUsers.length === 0 && (
+                <div style={{ padding: '3rem', textAlign: 'center', color: '#444', fontSize: '0.85rem' }}>No se encontraron agentes.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

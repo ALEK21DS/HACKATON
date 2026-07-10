@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -45,5 +45,15 @@ export class OrgUsersController {
       displayName: dto.displayName,
       role: dto.role,
     });
+  }
+
+  @Patch(':id/deactivate')
+  deactivate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.orgUsers.deactivate(user.organizationId!, id, user.userId);
+  }
+
+  @Patch(':id/reactivate')
+  reactivate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.orgUsers.reactivate(user.organizationId!, id);
   }
 }

@@ -47,4 +47,14 @@ export class BroadcastController {
       templateVariables: dto.templateVariables,
     });
   }
+
+  @Get('audit/assignments')
+  async getAssignmentAudit(@CurrentUser() user: AuthUser) {
+    return this.broadcast.getAssignmentAuditLogs(user.organizationId!);
+  }
+
+  @Get('audit/broadcast')
+  async getBroadcastAudit(@CurrentUser() user: AuthUser) {
+    return this.broadcast.getBroadcastAuditLogs(user.organizationId!);
+  }
 }

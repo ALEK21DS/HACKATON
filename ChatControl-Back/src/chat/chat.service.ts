@@ -7,9 +7,9 @@ import { Window24hService } from '../common/window-24h.service';
 import { AiService } from '../ai/ai.service';
 import { SettingsService } from '../settings/settings.service';
 import { ChatGateway } from './chat.gateway';
-import { LeadDetectionService } from '../lead-assignment/lead-detection.service';
+import { LeadAssignmentService } from '../lead-assignment/lead-assignment.service';
 import { StorageService } from '../common/storage.service';
-import { normalizePhone } from '../common/text-similarity.util';
+import { normalizePhone } from '../common/phone.util';
 import { ConversationsQueryService } from './conversations-query.service';
 
 export interface Message {
@@ -51,7 +51,7 @@ export class ChatService {
     private readonly settings: SettingsService,
     private readonly chatGateway: ChatGateway,
     private readonly config: ConfigService,
-    private readonly leadDetection: LeadDetectionService,
+    private readonly leadAssignment: LeadAssignmentService,
     private readonly storage: StorageService,
     private readonly conversationsQuery: ConversationsQueryService,
   ) {}
@@ -151,8 +151,8 @@ export class ChatService {
         },
       });
 
-      if (isNewConversation && payload.type === MessageType.TEXT) {
-        await this.leadDetection.tryAutoDetectAndAssign(conversation.id, payload.organizationId, payload.text);
+      if (isNewConversation) {
+        await this.leadAssignment.tryAutoAssignNewLead(conversation.id, payload.organizationId);
       }
 
       this.chatGateway.emitNewMessage(

@@ -56,6 +56,7 @@ export default function CrmListsPage() {
             <Link href="/broadcast" style={subNavStyle(false)}>Campañas</Link>
             <Link href="/templates" style={subNavStyle(false)}>Templates</Link>
             <Link href="/broadcast/crm-lists" style={subNavStyle(true)}>Listas CRM</Link>
+            <Link href="/broadcast/audit" style={subNavStyle(false)}>Auditoría</Link>
           </div>
           <h1 style={{ fontSize: '2rem', fontWeight: 900, margin: 0 }}>Listas CRM</h1>
           <p style={{ color: '#666', marginTop: '0.5rem' }}>

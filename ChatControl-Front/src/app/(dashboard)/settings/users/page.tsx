@@ -10,10 +10,12 @@ import {
   createOrgUser,
   updateOrgUser,
   resetOrgUserPassword,
+  deactivateOrgUser,
+  reactivateOrgUser,
   type UserRole,
 } from '../../../../lib/api';
 
-type OrgUserRow = { id: string; email: string; displayName: string | null; role: UserRole; createdAt: string };
+type OrgUserRow = { id: string; email: string; displayName: string | null; role: UserRole; isActive: boolean; createdAt: string };
 
 // --- Icons ---
 function SearchIcon({ style }: { style?: React.CSSProperties }) {
@@ -115,6 +117,11 @@ export default function OrgUsersPage() {
   const [savingUpdate, setSavingUpdate] = useState(false);
   const [savingReset, setSavingReset] = useState(false);
 
+  // Deactivate
+  const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
+  const [deactivateTarget, setDeactivateTarget] = useState<OrgUserRow | null>(null);
+  const [deactivating, setDeactivating] = useState(false);
+
   async function refresh() {
     try {
       const data = await getOrgUsers();
@@ -183,6 +190,35 @@ export default function OrgUsersPage() {
     } catch (e) { setErr(e instanceof Error ? e.message : 'Error al cambiar contraseña'); }
     finally { setSavingReset(false); }
   }
+
+  const handleDeactivate = async () => {
+    if (!deactivateTarget) return;
+    setDeactivating(true);
+    try {
+      const result = await deactivateOrgUser(deactivateTarget.id);
+      setMsg(`Usuario ${result.deactivatedUser} desactivado. ${result.reassigned} conversaciones reasignadas.`);
+      await refresh();
+      setShowDeactivateConfirm(false);
+      setDeactivateTarget(null);
+      setTimeout(() => setMsg(''), 4000);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Error al desactivar usuario');
+      setShowDeactivateConfirm(false);
+    } finally {
+      setDeactivating(false);
+    }
+  };
+
+  const handleReactivate = async (user: OrgUserRow) => {
+    try {
+      const result = await reactivateOrgUser(user.id);
+      setMsg(`Usuario ${result.reactivatedUser} reactivado.`);
+      await refresh();
+      setTimeout(() => setMsg(''), 4000);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Error al reactivar usuario');
+    }
+  };
 
   const handleNew = () => {
     setSelectedUser(null);
@@ -284,13 +320,16 @@ export default function OrgUsersPage() {
               </thead>
               <tbody>
                 {paginatedUsers.length > 0 ? paginatedUsers.map((u) => (
-                  <tr key={u.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)', transition: 'background 0.2s ease' }} className="table-row-hover">
+                  <tr key={u.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)', transition: 'background 0.2s ease', opacity: u.isActive ? 1 : 0.5 }} className="table-row-hover">
                     <td style={{ padding: '1rem' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                         <div style={{ width: 32, height: 32, borderRadius: '10px', background: u.role === 'ORG_ADMIN' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(255, 255, 255, 0.03)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: u.role === 'ORG_ADMIN' ? '#EF4444' : '#444' }}>
                           <PersonIcon />
                         </div>
                         <span style={{ fontSize: '0.9rem', color: '#F2F2F2', fontWeight: 700 }}>{u.displayName || 'Sin Nombre'}</span>
+                        {!u.isActive && (
+                          <span style={{ fontSize: '0.6rem', fontWeight: 900, padding: '0.15rem 0.5rem', borderRadius: 4, background: 'rgba(239, 68, 68, 0.15)', color: '#EF4444', textTransform: 'uppercase' }}>Inactivo</span>
+                        )}
                       </div>
                     </td>
                     <td style={{ padding: '1rem', fontSize: '0.85rem', color: '#666' }}>{u.email}</td>
@@ -299,13 +338,28 @@ export default function OrgUsersPage() {
                         {u.role === 'ORG_ADMIN' ? 'Admin' : 'Agente'}
                       </span>
                     </td>
-                    <td style={{ padding: '1rem', textAlign: 'right' }}>
+                    <td style={{ padding: '1rem', textAlign: 'right', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                       <button 
                         onClick={() => openDetails(u)}
                         style={{ padding: '0.4rem 0.8rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 8, color: '#8C8C8C', cursor: 'pointer', transition: 'all 0.2s', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase' }}
                       >
                         DETALLES
                       </button>
+                      {u.isActive ? (
+                        <button 
+                          onClick={() => { setDeactivateTarget(u); setShowDeactivateConfirm(true); }}
+                          style={{ padding: '0.4rem 0.8rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: 8, color: '#EF4444', cursor: 'pointer', transition: 'all 0.2s', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase' }}
+                        >
+                          DESACTIVAR
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => handleReactivate(u)}
+                          style={{ padding: '0.4rem 0.8rem', background: 'rgba(74, 222, 128, 0.1)', border: '1px solid rgba(74, 222, 128, 0.2)', borderRadius: 8, color: '#4ADE80', cursor: 'pointer', transition: 'all 0.2s', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase' }}
+                        >
+                          REACTIVAR
+                        </button>
+                      )}
                     </td>
                   </tr>
                 )) : (
@@ -337,6 +391,37 @@ export default function OrgUsersPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* DEACTIVATE CONFIRMATION */}
+      {showDeactivateConfirm && deactivateTarget && (
+        <div onClick={() => { if (!deactivating) { setShowDeactivateConfirm(false); setDeactivateTarget(null); } }} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: '420px', background: '#0a0a0a', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '24px', padding: '2.5rem', position: 'relative', boxShadow: '0 25px 70px rgba(0,0,0,0.8)' }}>
+            <button onClick={() => { if (!deactivating) { setShowDeactivateConfirm(false); setDeactivateTarget(null); } }} style={{ position: 'absolute', right: '1.5rem', top: '1.5rem', background: 'none', border: 'none', color: '#444', cursor: 'pointer' }}>
+              <XIcon />
+            </button>
+            <h3 style={{ fontSize: '1.3rem', fontWeight: 900, color: '#EF4444', marginBottom: '0.75rem' }}>Desactivar usuario</h3>
+            <p style={{ color: '#8C8C8C', fontSize: '0.85rem', lineHeight: '1.6', marginBottom: '2rem' }}>
+              Se desactivará <strong style={{ color: '#F2F2F2' }}>{deactivateTarget.displayName || deactivateTarget.email}</strong> y sus conversaciones asignadas se reasignarán automáticamente a otros agentes. Podrás reactivarlo más tarde.
+            </p>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                onClick={() => { setShowDeactivateConfirm(false); setDeactivateTarget(null); }}
+                disabled={deactivating}
+                style={{ flex: 1, padding: '1rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 14, color: '#8C8C8C', fontSize: '0.85rem', fontWeight: 800, textTransform: 'uppercase', cursor: 'pointer' }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeactivate}
+                disabled={deactivating}
+                style={{ flex: 1, padding: '1rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: 14, color: 'white', fontSize: '0.85rem', fontWeight: 800, textTransform: 'uppercase', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: deactivating ? 0.7 : 1 }}
+              >
+                {deactivating ? <><Spinner /> Desactivando...</> : 'Desactivar'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* CREATE MODAL */}

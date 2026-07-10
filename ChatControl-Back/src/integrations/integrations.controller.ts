@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -6,7 +6,14 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth.types';
 import { OrgMemberGuard } from '../auth/org-member.guard';
 import { UserRole } from '@prisma/client';
-import { IntegrationsService, type UpdateIntegrationsDto, type LeadDetectionConfigDto } from './integrations.service';
+import { IsArray, IsString } from 'class-validator';
+import { IntegrationsService, type UpdateIntegrationsDto } from './integrations.service';
+
+class LeadAssignmentAgentsDto {
+  @IsArray()
+  @IsString({ each: true })
+  agentIds!: string[];
+}
 
 @Controller('org/integrations')
 @UseGuards(JwtAuthGuard, OrgMemberGuard, RolesGuard)
@@ -24,16 +31,33 @@ export class IntegrationsController {
     return this.integrations.update(user.organizationId!, body);
   }
 
-  @Get('lead-detection')
-  async getLeadDetection(@CurrentUser() user: AuthUser) {
-    return this.integrations.getLeadDetectionConfig(user.organizationId!);
+  @Get('lead-assignment-enabled')
+  async getLeadAssignmentEnabled(@CurrentUser() user: AuthUser) {
+    const enabled = await this.integrations.getLeadAssignmentEnabled(user.organizationId!);
+    return { enabled };
   }
 
-  @Patch('lead-detection')
-  async updateLeadDetection(
+  @Patch('lead-assignment-enabled')
+  async updateLeadAssignmentEnabled(
     @CurrentUser() user: AuthUser,
-    @Body() config: LeadDetectionConfigDto,
+    @Body() body: { enabled: boolean },
   ) {
-    return this.integrations.updateLeadDetectionConfig(user.organizationId!, config);
+    await this.integrations.updateLeadAssignmentEnabled(user.organizationId!, body.enabled);
+    return { enabled: body.enabled };
+  }
+
+  @Get('lead-assignment')
+  async getLeadAssignment(@CurrentUser() user: AuthUser) {
+    const agentIds = await this.integrations.getLeadAssignmentAgents(user.organizationId!);
+    return { agentIds };
+  }
+
+  @Patch('lead-assignment')
+  async updateLeadAssignment(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: LeadAssignmentAgentsDto,
+  ) {
+    await this.integrations.updateLeadAssignmentAgents(user.organizationId!, dto.agentIds);
+    return { agentIds: dto.agentIds };
   }
 }

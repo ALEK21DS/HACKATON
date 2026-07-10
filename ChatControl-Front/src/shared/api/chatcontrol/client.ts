@@ -211,6 +211,10 @@ export async function assignConversation(
   });
 }
 
+export async function backfillAssignments(): Promise<{ assigned: number; total: number }> {
+  return api('/chat/conversations/backfill-assignment', { method: 'POST' });
+}
+
 export async function sendMedia(
   conversationId: string,
   file: File,
@@ -509,20 +513,29 @@ export interface OrgOutboundAuditRow {
   sentBy: { id: string; email: string; displayName: string | null } | null;
 }
 
-// Lead Detection Config
-export interface LeadDetectionConfig {
-  enabled: boolean;
-  autoMessage: string;
+export interface LeadAssignmentAgents {
+  agentIds: string[];
 }
 
-export async function getLeadDetectionConfig(): Promise<LeadDetectionConfig> {
-  return api<LeadDetectionConfig>('/org/integrations/lead-detection');
+export async function getLeadAssignmentEnabled(): Promise<{ enabled: boolean }> {
+  return api<{ enabled: boolean }>('/org/integrations/lead-assignment-enabled');
 }
 
-export async function updateLeadDetectionConfig(config: LeadDetectionConfig): Promise<LeadDetectionConfig> {
-  return api<LeadDetectionConfig>('/org/integrations/lead-detection', {
+export async function updateLeadAssignmentEnabled(enabled: boolean): Promise<{ enabled: boolean }> {
+  return api<{ enabled: boolean }>('/org/integrations/lead-assignment-enabled', {
     method: 'PATCH',
-    body: JSON.stringify(config),
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function getLeadAssignmentAgents(): Promise<LeadAssignmentAgents> {
+  return api<LeadAssignmentAgents>('/org/integrations/lead-assignment');
+}
+
+export async function updateLeadAssignmentAgents(agentIds: string[]): Promise<LeadAssignmentAgents> {
+  return api<LeadAssignmentAgents>('/org/integrations/lead-assignment', {
+    method: 'PATCH',
+    body: JSON.stringify({ agentIds }),
   });
 }
 
@@ -556,7 +569,7 @@ export async function updateIntegrations(body: {
 }
 
 export async function getOrgUsers(): Promise<
-  Array<{ id: string; email: string; displayName: string | null; role: UserRole; createdAt: string }>
+  Array<{ id: string; email: string; displayName: string | null; role: UserRole; isActive: boolean; createdAt: string }>
 > {
   return api('/org/users');
 }
@@ -585,6 +598,43 @@ export async function resetOrgUserPassword(
     method: 'PATCH',
     body: JSON.stringify({ newPassword }),
   });
+}
+
+export async function deactivateOrgUser(id: string): Promise<{ deactivatedUser: string; reassigned: number }> {
+  return api(`/org/users/${id}/deactivate`, { method: 'PATCH' });
+}
+
+export async function reactivateOrgUser(id: string): Promise<{ reactivatedUser: string }> {
+  return api(`/org/users/${id}/reactivate`, { method: 'PATCH' });
+}
+
+export interface AssignmentLogEntry {
+  id: string;
+  conversationId: string;
+  fromUserId: string | null;
+  toUserId: string | null;
+  reassignedByUserId: string;
+  reason: string;
+  createdAt: string;
+}
+
+export async function getAssignmentAuditLogs(): Promise<AssignmentLogEntry[]> {
+  return api<AssignmentLogEntry[]>('/broadcast/audit/assignments');
+}
+
+export interface BroadcastLogEntry {
+  id: string;
+  conversationId: string;
+  type: string;
+  status: string;
+  errorMessage: string | null;
+  createdAt: string;
+  organizationId: string | null;
+  userId: string | null;
+}
+
+export async function getBroadcastAuditLogs(): Promise<BroadcastLogEntry[]> {
+  return api<BroadcastLogEntry[]>('/broadcast/audit/broadcast');
 }
 
 export async function sendMediaFile(

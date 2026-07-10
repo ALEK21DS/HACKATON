@@ -460,6 +460,7 @@ export default function BroadcastPage() {
               <a href="/broadcast" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#EF4444', textTransform: 'uppercase', textDecoration: 'none' }}>Campañas</a>
               <a href="/templates" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#666', textTransform: 'uppercase', textDecoration: 'none' }}>Templates</a>
               <a href="/broadcast/crm-lists" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#666', textTransform: 'uppercase', textDecoration: 'none' }}>Listas CRM</a>
+              <a href="/broadcast/audit" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#666', textTransform: 'uppercase', textDecoration: 'none' }}>Auditoría</a>
             </div>
             <p style={{ color: '#666', fontSize: '0.95rem' }}>Configura y dispara campañas masivas de alta tasa de apertura.</p>
           </header>
