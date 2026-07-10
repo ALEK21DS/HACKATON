@@ -145,6 +145,11 @@ export class ChatController {
     return { ok: true, text, usedFallbackModel };
   }
 
+  @Get('lead-assignment/next-agent')
+  async getNextAgent(@CurrentUser() user: AuthUser) {
+    return this.leadAssignment.peekNextAgent(user.organizationId!);
+  }
+
   @Post('conversations/backfill-assignment')
   @Roles(UserRole.ORG_ADMIN)
   async backfillAssignment(@CurrentUser() user: AuthUser) {

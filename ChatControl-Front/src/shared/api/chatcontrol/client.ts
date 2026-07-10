@@ -215,6 +215,10 @@ export async function backfillAssignments(): Promise<{ assigned: number; total: 
   return api('/chat/conversations/backfill-assignment', { method: 'POST' });
 }
 
+export async function getNextAgent(): Promise<{ id: string; displayName: string | null; email: string } | null> {
+  return api('/chat/lead-assignment/next-agent');
+}
+
 export async function sendMedia(
   conversationId: string,
   file: File,

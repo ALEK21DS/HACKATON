@@ -56,6 +56,16 @@ export class LeadAssignmentService {
     return this.assignNewLead(conversationId, organizationId);
   }
 
+  async peekNextAgent(organizationId: string): Promise<{ id: string; displayName: string | null; email: string } | null> {
+    const agentId = await this.getNextAgentInTurn(organizationId);
+    if (!agentId) return null;
+    const user = await this.prisma.user.findUnique({
+      where: { id: agentId },
+      select: { id: true, displayName: true, email: true },
+    });
+    return user;
+  }
+
   async assignHistoricalChats(organizationId: string): Promise<{ assigned: number; total: number }> {
     const unassigned = await this.prisma.conversation.findMany({
       where: {
@@ -74,7 +84,7 @@ export class LeadAssignmentService {
     return { assigned, total };
   }
 
-  private async getNextAgentInTurn(organizationId: string): Promise<string | null> {
+  async getNextAgentInTurn(organizationId: string): Promise<string | null> {
     const configuredIds = await this.integrations.getLeadAssignmentAgents(organizationId);
 
     const where: any = {

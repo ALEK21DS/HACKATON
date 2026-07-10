@@ -20,6 +20,7 @@ import {
   backfillAssignments,
   sendMedia,
   getOrgUsers,
+  getNextAgent,
   type Conversation,
   type Message,
   type NewMessagePayload,
@@ -152,6 +153,7 @@ export default function ChatPage() {
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
+  const [nextAgent, setNextAgent] = useState<{ id: string; displayName: string | null; email: string } | null>(null);
   const [toastMessage, setToastMessage] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -181,6 +183,7 @@ export default function ChatPage() {
       }
       if (m.role === 'ORG_ADMIN') {
         getOrgUsers().then(u => setOrgUsers(u)).catch(() => {});
+        getNextAgent().then(a => setNextAgent(a)).catch(() => {});
       }
     }).catch(() => {});
     loadConversations();
@@ -234,6 +237,7 @@ export default function ChatPage() {
 
     socket.on('conversation_assigned', (p: { conversationId: string; assignedToUserId: string }) => {
       loadConversations(false);
+      getNextAgent().then(a => setNextAgent(a)).catch(() => {});
     });
 
     socket.on('conversation_assigned_to_me', (p: { conversationId: string }) => {
@@ -391,6 +395,7 @@ export default function ChatPage() {
       setAssignModalOpen(false);
       setAssignSearch('');
       loadConversations(false);
+      getNextAgent().then(a => setNextAgent(a)).catch(() => {});
     } catch (err) {}
   }
 
@@ -405,6 +410,7 @@ export default function ChatPage() {
       }
       setTimeout(() => setToastMessage(''), 5000);
       loadConversations(false);
+      getNextAgent().then(a => setNextAgent(a)).catch(() => {});
     } catch (err) {
       setToastMessage('Error al asignar chats históricos.');
       setTimeout(() => setToastMessage(''), 5000);
@@ -605,6 +611,12 @@ export default function ChatPage() {
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', position: 'relative' }}>
                 {userRole === 'ORG_ADMIN' && (
                   <>
+                    {nextAgent && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem 0.8rem', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.12)', borderRadius: '8px', fontSize: '0.6rem', fontWeight: 800, color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                        Próximo: {nextAgent.displayName || nextAgent.email.split('@')[0]}
+                      </div>
+                    )}
                     <button
                       onClick={() => setAssignModalOpen(true)}
                       style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', color: '#8C8C8C', padding: '0.6rem 1.2rem', borderRadius: '10px', fontSize: '0.65rem', fontWeight: 700, cursor: 'pointer', textTransform: 'uppercase' }}
