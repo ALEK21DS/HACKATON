@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { Fragment, useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { io, Socket } from 'socket.io-client';
@@ -69,6 +69,51 @@ function PaperclipIcon({ style }: { style?: React.CSSProperties }) {
       <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
     </svg>
   );
+}
+
+function isSameLocalDay(firstTimestamp: number, secondTimestamp: number) {
+  const first = new Date(firstTimestamp);
+  const second = new Date(secondTimestamp);
+  return first.getFullYear() === second.getFullYear()
+    && first.getMonth() === second.getMonth()
+    && first.getDate() === second.getDate();
+}
+
+function dayLabel(timestamp: number) {
+  const date = new Date(timestamp);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  if (isSameLocalDay(timestamp, today.getTime())) return 'Hoy';
+  if (isSameLocalDay(timestamp, yesterday.getTime())) return 'Ayer';
+
+  return date.toLocaleDateString('es-ES', {
+    day: 'numeric',
+    month: 'long',
+    year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric',
+  });
+}
+
+function formatConversationDate(timestamp: number) {
+  const date = new Date(timestamp);
+  const today = new Date();
+  const calendarDay = (value: Date) => Date.UTC(value.getFullYear(), value.getMonth(), value.getDate());
+  const daysAgo = Math.round((calendarDay(today) - calendarDay(date)) / (24 * 60 * 60 * 1000));
+
+  if (daysAgo === 0) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  if (daysAgo === 1) return 'Ayer';
+  if (daysAgo > 1 && daysAgo < 7) {
+    return date.toLocaleDateString('es-ES', { weekday: 'long' });
+  }
+
+  return date.toLocaleDateString('es-ES', {
+    day: 'numeric',
+    month: 'short',
+    year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric',
+  });
 }
 
 export default function ChatPage() {
@@ -290,17 +335,6 @@ export default function ChatPage() {
       e.target.value = '';
       return;
     }
-    const allowedTypes = [
-      'image/jpeg', 'image/png', 'image/webp', 'image/gif',
-      'video/mp4', 'video/webm',
-      'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/mp4',
-      'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    ];
-    if (!allowedTypes.includes(file.type) && !file.name.endsWith('.pdf') && !file.name.endsWith('.docx') && !file.name.endsWith('.doc')) {
-      alert('Formato no permitido. Usa: JPG, PNG, WEBP, GIF, MP4, PDF o DOCX.');
-      e.target.value = '';
-      return;
-    }
     setSelectedFile(file);
     if (file.type.startsWith('image/')) {
       const reader = new FileReader();
@@ -483,7 +517,7 @@ export default function ChatPage() {
                   <span style={{ fontWeight: 700, fontSize: '0.95rem', color: selectedId === c.id ? 'white' : '#F2F2F2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {c.name || formatPhoneDisplay(c.phone)}
                   </span>
-                  <span style={{ fontSize: '0.7rem', color: '#444' }}>{c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                  <span style={{ fontSize: '0.7rem', color: '#444' }}>{c.lastMessageAt ? formatConversationDate(c.lastMessageAt) : ''}</span>
                 </div>
                 <p style={{ fontSize: '0.8rem', color: (c.unreadCount ?? 0) > 0 ? '#EF4444' : '#666', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: (c.unreadCount ?? 0) > 0 ? 700 : 400 }}>
                   {c.lastMessagePreview || 'Inicia una conversación'}
@@ -588,9 +622,9 @@ export default function ChatPage() {
                 </div>
               ) : (
                 <>
-                  <div style={{ alignSelf: 'center', background: 'rgba(255,255,255,0.03)', padding: '0.4rem 1rem', borderRadius: '20px', fontSize: '0.7rem', color: '#444', fontWeight: 700, textTransform: 'uppercase' }}>Hoy</div>
-                  
-                  {messages.map((m) => {
+                  {messages.map((m, index) => {
+                    const previousMessage = messages[index - 1];
+                    const startsNewDay = !previousMessage || !isSameLocalDay(m.timestamp, previousMessage.timestamp);
                     const isAgent = !m.fromUser;
                     const hasMedia = !!m.mediaUrl;
                     const isImage = m.type === 'IMAGE';
@@ -600,7 +634,13 @@ export default function ChatPage() {
                     const isSticker = isImage && m.mimeType?.toLowerCase() === 'image/webp';
 
                     return (
-                      <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAgent ? 'flex-end' : 'flex-start', maxWidth: '75%', alignSelf: isAgent ? 'flex-end' : 'flex-start' }}>
+                      <Fragment key={m.id}>
+                        {startsNewDay && (
+                          <div style={{ alignSelf: 'center', background: 'rgba(255,255,255,0.03)', padding: '0.4rem 1rem', borderRadius: '20px', fontSize: '0.7rem', color: '#444', fontWeight: 700, textTransform: 'uppercase' }}>
+                            {dayLabel(m.timestamp)}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: isAgent ? 'flex-end' : 'flex-start', maxWidth: '75%', alignSelf: isAgent ? 'flex-end' : 'flex-start' }}>
                         <div style={{ 
                           padding: (isImage || isVideo) && !m.text ? '0' : '1rem 1.25rem', 
                           borderRadius: isAgent ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
@@ -659,8 +699,8 @@ export default function ChatPage() {
                               )}
                               {isDocument && (
                                 <a 
-                                  href={m.mediaUrl!} 
-                                  target="_blank" 
+                                  href={`${m.mediaUrl!}${m.mediaUrl!.includes('?') ? '&' : '?'}download=${encodeURIComponent(m.fileName || 'documento')}`}
+                                  download={m.fileName || 'documento'}
                                   rel="noopener noreferrer" 
                                   style={{ 
                                     display: 'flex', 
@@ -701,7 +741,8 @@ export default function ChatPage() {
                           </span>
                           {isAgent && renderStatus(m.status)}
                         </div>
-                      </div>
+                        </div>
+                      </Fragment>
                     );
                   })}
                 </>
@@ -749,7 +790,6 @@ export default function ChatPage() {
                   ref={fileInputRef} 
                   onChange={handleFileSelect} 
                   style={{ display: 'none' }} 
-                  accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,audio/ogg,audio/wav,application/pdf"
                 />
                 <textarea 
                   value={replyInput}

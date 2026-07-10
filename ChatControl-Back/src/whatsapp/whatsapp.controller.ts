@@ -20,6 +20,25 @@ import { ChatService } from '../chat/chat.service';
 import { StorageService } from '../common/storage.service';
 import { MessageType, MessageStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { extname } from 'path';
+
+const mimeExtensions: Record<string, string> = {
+  'application/pdf': '.pdf',
+  'application/msword': '.doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+  'application/vnd.ms-excel': '.xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'application/vnd.ms-powerpoint': '.ppt',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+};
+
+function fileExtension(fileName: unknown, mimeType: string): string {
+  if (typeof fileName === 'string') {
+    const extension = extname(fileName).toLowerCase();
+    if (/^\.[a-z0-9]{1,20}$/.test(extension)) return extension;
+  }
+  return mimeExtensions[mimeType.toLowerCase()] || '.bin';
+}
 
 @Controller('whatsapp')
 export class WhatsAppController {
@@ -143,8 +162,9 @@ export class WhatsAppController {
               const mediaId = mediaData.id;
               const downloaded = await this.whatsapp.downloadMedia(mediaId, organizationId);
               if (downloaded) {
-                const extension = downloaded.mimeType.split('/')[1] || 'bin';
-                const path = `chats/${organizationId}/${mediaId}.${extension}`;
+                // Preserve the original extension. Structured MIME subtypes are not file extensions.
+                const extension = fileExtension(mediaData.filename, downloaded.mimeType);
+                const path = `chats/${organizationId}/${mediaId}${extension}`;
                 const mediaUrl = await this.storage.uploadFile('chat-media', path, downloaded.buffer, downloaded.mimeType);
                 if (mediaUrl) {
                   let dbType: MessageType = msg.type.toUpperCase() as MessageType;
