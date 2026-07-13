@@ -103,6 +103,26 @@ export class ChatService {
       });
     }
 
+    // Asociar contacto a la campaña activa si existe
+    const activeCampaign = await this.prisma.campaign.findFirst({
+      where: { organizationId: payload.organizationId, isActive: true },
+    });
+    if (activeCampaign) {
+      await this.prisma.campaignContact.upsert({
+        where: {
+          campaignId_contactId: {
+            campaignId: activeCampaign.id,
+            contactId: contact.id,
+          },
+        },
+        create: {
+          campaignId: activeCampaign.id,
+          contactId: contact.id,
+        },
+        update: {},
+      });
+    }
+
     // Detectar edición: buscar mensaje existente por wamid
     const existingMessage = await this.prisma.message.findUnique({
       where: { whatsappMessageId: payload.messageId },

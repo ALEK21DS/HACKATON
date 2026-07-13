@@ -199,6 +199,7 @@ model Contact {
   conversations       Conversation[]
   broadcastListLinks  BroadcastListContact[]
   crmContactLinks     CrmContactLink[]
+  campaignContacts    CampaignContact[]
 
   @@unique([organizationId, phone])
   @@index([phone])
@@ -352,16 +353,31 @@ enum MessageStatus {
 }
 
 model Campaign {
-  id             String       @id @default(cuid())
+  id             String             @id @default(cuid())
   organizationId String
   name           String
   description    String?
-  isActive       Boolean      @default(true)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @default(now()) @updatedAt
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  isActive       Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @default(now()) @updatedAt
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaignContacts CampaignContact[]
 
   @@index([organizationId])
   @@index([isActive])
+}
+
+model CampaignContact {
+  id          String   @id @default(cuid())
+  campaignId  String
+  contactId   String
+  createdAt   DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, contactId])
+  @@index([campaignId])
+  @@index([contactId])
 }
 
