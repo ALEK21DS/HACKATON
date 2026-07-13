@@ -90,7 +90,7 @@ export class LeadAssignmentService {
     const where: any = {
       organizationId,
       isActive: true,
-      role: { in: [UserRole.ORG_ADMIN, UserRole.AGENT] },
+      role: UserRole.AGENT,
     };
     if (configuredIds.length > 0) {
       where.id = { in: configuredIds };
