@@ -162,14 +162,16 @@ export class ContactsService {
       where: { id: { in: campaignIds }, organizationId },
     });
 
-    const ccRecords = await this.prisma.campaignContact.findMany({
+    const campaignContactsDirect = await this.prisma.contact.findMany({
       where: {
         campaignId: { in: campaignIds },
-        contactId: { in: contactIds },
+        id: { in: contactIds },
+        organizationId,
       },
+      select: { id: true, campaignId: true, createdAt: true },
     });
 
-    const contactIdsInCampaigns = ccRecords.map(r => r.contactId);
+    const contactIdsInCampaigns = campaignContactsDirect.map(c => c.id);
 
     const where: any = { organizationId, id: { in: contactIdsInCampaigns } };
     if (userRole === 'AGENT' && userId) {
@@ -201,18 +203,22 @@ export class ContactsService {
       contacts: any[];
     }> = [];
 
-    const campaignGroup: Record<string, typeof ccRecords> = {};
-    for (const r of ccRecords) {
-      if (!campaignGroup[r.campaignId]) campaignGroup[r.campaignId] = [];
-      campaignGroup[r.campaignId].push(r);
+    const campaignGroup: Record<string, typeof campaignContactsDirect> = {};
+    for (const c of campaignContactsDirect) {
+      if (!campaignGroup[c.campaignId!]) campaignGroup[c.campaignId!] = [];
+      campaignGroup[c.campaignId!].push(c);
     }
 
     for (const campaign of campaigns) {
       const records = campaignGroup[campaign.id] || [];
       const campaignContacts: any[] = [];
 
+      const seenContactIds = new Set<string>();
       for (const r of records) {
-        const c = contactMap.get(r.contactId);
+        if (seenContactIds.has(r.id)) continue;
+        seenContactIds.add(r.id);
+
+        const c = contactMap.get(r.id);
         if (!c) continue;
 
         const conversation = c.conversations?.[0];
@@ -252,19 +258,20 @@ export class ContactsService {
     organizationId: string,
     campaignIds: string[],
   ): Promise<Record<string, string[]>> {
-    const records = await this.prisma.campaignContact.findMany({
+    const contacts = await this.prisma.contact.findMany({
       where: {
         campaignId: { in: campaignIds },
-        contact: { organizationId },
+        organizationId,
       },
-      select: { campaignId: true, contactId: true },
+      select: { id: true, campaignId: true },
     });
 
     const byCampaign: Record<string, string[]> = {};
-    for (const r of records) {
-      if (!byCampaign[r.campaignId]) byCampaign[r.campaignId] = [];
-      byCampaign[r.campaignId].push(r.contactId);
+    for (const c of contacts) {
+      if (!byCampaign[c.campaignId!]) byCampaign[c.campaignId!] = [];
+      byCampaign[c.campaignId!].push(c.id);
     }
+
     return byCampaign;
   }
 

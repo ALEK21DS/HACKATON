@@ -141,6 +141,13 @@ export default function InformesPage() {
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
   const [campaignContactMap, setCampaignContactMap] = useState<Record<string, string[]>>({});
   const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [campaignSearch, setCampaignSearch] = useState('');
+
+  const filteredCampaigns = campaigns.filter(c =>
+    !campaignSearch.trim() ||
+    c.name.toLowerCase().includes(campaignSearch.toLowerCase()) ||
+    (c.description?.toLowerCase().includes(campaignSearch.toLowerCase()) ?? false)
+  );
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -159,6 +166,13 @@ export default function InformesPage() {
         setContacts(list);
         setMe(meData);
         setCampaigns(campaignsData);
+
+        // Precargar mapa campaña → contactos para todas las campañas
+        if (campaignsData.length > 0) {
+          const allIds = campaignsData.map(c => c.id);
+          const res = await getCampaignContactMap(allIds);
+          setCampaignContactMap(res.byCampaign);
+        }
       } catch (err) { } finally { setLoading(false); setLoadingCampaigns(false); }
     })();
   }, [mounted, router]);
@@ -187,7 +201,7 @@ export default function InformesPage() {
     setSelectedIds(next);
   };
 
-  const toggleCampaign = async (campaignId: string) => {
+  const toggleCampaign = (campaignId: string) => {
     const nextCampaigns = new Set(selectedCampaignIds);
     const nextContacts = new Set(selectedIds);
 
@@ -197,21 +211,8 @@ export default function InformesPage() {
       for (const cid of toRemove) nextContacts.delete(cid);
     } else {
       nextCampaigns.add(campaignId);
-      const needed = [campaignId];
-      const missing = needed.filter(id => !campaignContactMap[id]);
-      if (missing.length > 0) {
-        try {
-          const res = await getCampaignContactMap(missing);
-          setCampaignContactMap(prev => ({ ...prev, ...res.byCampaign }));
-          for (const id of missing) {
-            const ids = res.byCampaign[id] || [];
-            for (const cid of ids) nextContacts.add(cid);
-          }
-        } catch { }
-      } else {
-        const ids = campaignContactMap[campaignId] || [];
-        for (const cid of ids) nextContacts.add(cid);
-      }
+      const ids = campaignContactMap[campaignId] || [];
+      for (const cid of ids) nextContacts.add(cid);
     }
 
     setSelectedCampaignIds(nextCampaigns);
@@ -352,24 +353,47 @@ export default function InformesPage() {
               <p style={{ margin: '0 0 0.5rem', fontSize: '0.65rem', fontWeight: 800, color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                 Filtrar por campaña
               </p>
-              {campaigns.map(c => {
-                const isCampaignSelected = selectedCampaignIds.has(c.id);
-                return (
-                  <div
-                    key={c.id}
-                    onClick={() => toggleCampaign(c.id)}
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.25rem', borderRadius: '6px', cursor: 'pointer', userSelect: 'none', opacity: c.isActive ? 1 : 0.55 }}
-                  >
-                    <div style={{ width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0, border: `2px solid ${isCampaignSelected ? '#EF4444' : 'rgba(255,255,255,0.15)'}`, background: isCampaignSelected ? '#EF4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease' }}>
-                      {isCampaignSelected && <CheckIcon />}
+
+              {/* Search dentro del filtro */}
+              <div style={{ position: 'relative', marginBottom: '0.5rem' }}>
+                <SearchIcon style={{ position: 'absolute', left: '0.5rem', top: '50%', transform: 'translateY(-50%)', color: '#444', width: '0.75rem', height: '0.75rem' }} />
+                <input
+                  type="text"
+                  placeholder="Buscar campaña..."
+                  value={campaignSearch}
+                  onChange={(e) => setCampaignSearch(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '0.4rem 0.5rem 0.4rem 1.6rem', color: 'white', outline: 'none', fontSize: '0.72rem', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {/* Lista de campañas filtrada */}
+              <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                {filteredCampaigns.length === 0 ? (
+                  <p style={{ fontSize: '0.7rem', color: '#555', padding: '0.5rem 0', textAlign: 'center' }}>
+                    {campaignSearch ? 'Sin resultados' : 'Sin campañas'}
+                  </p>
+                ) : filteredCampaigns.map(c => {
+                  const isCampaignSelected = selectedCampaignIds.has(c.id);
+                  const contactCount = campaignContactMap[c.id]?.length || 0;
+                  return (
+                    <div
+                      key={c.id}
+                      onClick={() => toggleCampaign(c.id)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.25rem', borderRadius: '6px', cursor: 'pointer', userSelect: 'none', opacity: c.isActive ? 1 : 0.55 }}
+                    >
+                      <div style={{ width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0, border: `2px solid ${isCampaignSelected ? '#EF4444' : 'rgba(255,255,255,0.15)'}`, background: isCampaignSelected ? '#EF4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease' }}>
+                        {isCampaignSelected && <CheckIcon />}
+                      </div>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: isCampaignSelected ? '#FFF' : '#AAA', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {c.name}
+                      </span>
+                      <span style={{ fontSize: '0.6rem', color: '#555' }}>{contactCount}</span>
+                      {c.isActive && <span style={{ fontSize: '0.6rem', fontWeight: 800, color: '#4ADE80', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Activa</span>}
                     </div>
-                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: isCampaignSelected ? '#FFF' : '#AAA', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {c.name}
-                    </span>
-                    {c.isActive && <span style={{ fontSize: '0.6rem', fontWeight: 800, color: '#4ADE80', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Activa</span>}
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

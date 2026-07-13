@@ -195,7 +195,9 @@ model Contact {
   isSandboxAuthorized Boolean        @default(false)
   name                String?
   organizationId      String
+  campaignId          String?
   organization        Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaign            Campaign?      @relation(fields: [campaignId], references: [id])
   conversations       Conversation[]
   broadcastListLinks  BroadcastListContact[]
   crmContactLinks     CrmContactLink[]
@@ -203,6 +205,7 @@ model Contact {
 
   @@unique([organizationId, phone])
   @@index([phone])
+  @@index([campaignId])
 }
 
 model Conversation {
@@ -215,7 +218,9 @@ model Conversation {
   assignedToUserId  String?
   assignedAt        DateTime?
   autoMessageDetectedAt DateTime?
+  campaignId        String?
   contact           Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  campaign          Campaign? @relation(fields: [campaignId], references: [id])
   messages          Message[]
   assignedToUser    User?     @relation("ConversationAssigned", fields: [assignedToUserId], references: [id])
   assignmentLog     ConversationAssignmentLog[]
@@ -224,6 +229,7 @@ model Conversation {
   @@index([contactId, createdAt(sort: Desc)])
   @@index([assignedToUserId])
   @@index([isNewLead])
+  @@index([campaignId])
 }
 
 model ConversationAssignmentLog {
@@ -362,6 +368,8 @@ model Campaign {
   updatedAt      DateTime           @default(now()) @updatedAt
   organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   campaignContacts CampaignContact[]
+  contacts         Contact[]
+  conversations    Conversation[]
 
   @@index([organizationId])
   @@index([isActive])
