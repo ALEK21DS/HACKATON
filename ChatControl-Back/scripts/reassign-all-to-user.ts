@@ -77,7 +77,7 @@ async function main() {
     const stillAssigned = await prisma.conversation.count({
       where: {
         contact: { organizationId: org.id },
-        assignedToUserId: { not: null, not: user.id },
+        assignedToUserId: { not: user.id },
       },
     });
     if (stillAssigned > 0) {
