@@ -572,10 +572,11 @@ export async function updateIntegrations(body: {
   });
 }
 
-export async function getOrgUsers(): Promise<
+export async function getOrgUsers(params?: { assignable?: boolean }): Promise<
   Array<{ id: string; email: string; displayName: string | null; role: UserRole; isActive: boolean; createdAt: string }>
 > {
-  return api('/org/users');
+  const query = params?.assignable ? '?assignable=true' : '';
+  return api('/org/users' + query);
 }
 
 export async function createOrgUser(body: {

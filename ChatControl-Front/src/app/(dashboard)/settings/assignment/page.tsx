@@ -97,7 +97,7 @@ export default function AssignmentPage() {
       try {
         const me = await getMe();
         if (me.role !== 'ORG_ADMIN') { router.replace('/settings'); return; }
-        const users = await getOrgUsers();
+        const users = await getOrgUsers({ assignable: true });
         setAllOrgUsers(users);
 
         const { enabled } = await getLeadAssignmentEnabled();
