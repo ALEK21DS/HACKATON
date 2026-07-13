@@ -69,6 +69,18 @@ export class ChatService {
     contactName?: string;
   }): Promise<void> {
     const phone = normalizePhone(payload.from);
+
+    // Obtener campaña activa antes de crear/actualizar todo
+    const activeCampaign = await this.prisma.campaign.findFirst({
+      where: { organizationId: payload.organizationId, isActive: true },
+    });
+    const activeCampaignId = activeCampaign?.id ?? null;
+
+    const contactUpdateData: any = {};
+    if (activeCampaignId) {
+      contactUpdateData.campaignId = activeCampaignId;
+    }
+
     const contact = await this.prisma.contact.upsert({
       where: {
         organizationId_phone: {
@@ -80,9 +92,11 @@ export class ChatService {
         organizationId: payload.organizationId, 
         phone,
         name: payload.contactName || null,
+        campaignId: activeCampaignId,
       },
-      update: {},
+      update: contactUpdateData,
     });
+
     let conversation = await this.prisma.conversation.findFirst({
       where: { contactId: contact.id },
       orderBy: { createdAt: 'desc' },
@@ -94,12 +108,34 @@ export class ChatService {
         data: {
           contactId: contact.id,
           lastUserMessageAt: new Date(payload.timestamp),
+          campaignId: activeCampaignId,
         },
       });
     } else {
+      const updateData: any = { lastUserMessageAt: new Date(payload.timestamp) };
+      if (activeCampaignId && conversation.campaignId !== activeCampaignId) {
+        updateData.campaignId = activeCampaignId;
+      }
       await this.prisma.conversation.update({
         where: { id: conversation.id },
-        data: { lastUserMessageAt: new Date(payload.timestamp) },
+        data: updateData,
+      });
+    }
+
+    // Historial en CampaignContact
+    if (activeCampaign) {
+      await this.prisma.campaignContact.upsert({
+        where: {
+          campaignId_contactId: {
+            campaignId: activeCampaign.id,
+            contactId: contact.id,
+          },
+        },
+        create: {
+          campaignId: activeCampaign.id,
+          contactId: contact.id,
+        },
+        update: {},
       });
     }
 
@@ -346,6 +382,47 @@ export class ChatService {
     return conv;
   }
 
+  private async ensureCampaignAssignment(
+    organizationId: string,
+    contactId: string,
+    conversationId: string,
+  ): Promise<void> {
+    const activeCampaign = await this.prisma.campaign.findFirst({
+      where: { organizationId, isActive: true },
+    });
+    if (!activeCampaign) return;
+
+    await this.prisma.contact.update({
+      where: { id: contactId },
+      data: { campaignId: activeCampaign.id },
+    });
+
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { campaignId: true },
+    });
+    if (conv && conv.campaignId !== activeCampaign.id) {
+      await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: { campaignId: activeCampaign.id },
+      });
+    }
+
+    await this.prisma.campaignContact.upsert({
+      where: {
+        campaignId_contactId: {
+          campaignId: activeCampaign.id,
+          contactId,
+        },
+      },
+      create: {
+        campaignId: activeCampaign.id,
+        contactId,
+      },
+      update: {},
+    });
+  }
+
   async sendMessage(params: {
     organizationId: string;
     conversationId: string;
@@ -384,6 +461,7 @@ export class ChatService {
       status: created.status,
     };
     this.chatGateway.emitNewMessage(params.organizationId, params.conversationId, msg);
+    await this.ensureCampaignAssignment(params.organizationId, conv.contact.id, params.conversationId);
     return msg;
   }
 
@@ -441,6 +519,7 @@ export class ChatService {
       status: created.status,
     };
     this.chatGateway.emitNewMessage(params.organizationId, params.conversationId, msg);
+    await this.ensureCampaignAssignment(params.organizationId, conv.contact.id, params.conversationId);
     return msg;
   }
 
@@ -507,6 +586,7 @@ export class ChatService {
     };
 
     this.chatGateway.emitNewMessage(params.organizationId, params.conversationId, msg);
+    await this.ensureCampaignAssignment(params.organizationId, conv.contact.id, params.conversationId);
     return msg;
   }
 

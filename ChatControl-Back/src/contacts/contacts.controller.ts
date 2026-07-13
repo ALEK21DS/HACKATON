@@ -50,7 +50,7 @@ export class ContactsController {
   @Post('export')
   async exportContacts(
     @CurrentUser() user: AuthUser,
-    @Body() body: { contactIds: string[] },
+    @Body() body: { contactIds: string[]; campaignIds?: string[] },
   ) {
     const rows = await this.contacts.exportContacts(
       user.organizationId!,
@@ -58,6 +58,35 @@ export class ContactsController {
       user.userId,
       user.role,
     );
-    return { ok: true, rows };
+
+    let byCampaign: Array<{
+      campaign: any;
+      contacts: any[];
+    }> = [];
+
+    if (body.campaignIds && body.campaignIds.length > 0) {
+      const campaigns = await this.contacts.getExportGroupedByCampaign(
+        user.organizationId!,
+        body.campaignIds,
+        body.contactIds,
+        user.userId,
+        user.role,
+      );
+      byCampaign = campaigns;
+    }
+
+    return { ok: true, rows, byCampaign };
+  }
+
+  @Post('campaign-contacts')
+  async getCampaignContacts(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { campaignIds: string[] },
+  ) {
+    const map = await this.contacts.getCampaignContacts(
+      user.organizationId!,
+      body.campaignIds,
+    );
+    return { ok: true, byCampaign: map };
   }
 }

@@ -821,10 +821,40 @@ export interface ExportContactRow {
   agent: string;
 }
 
-export async function exportContacts(contactIds: string[]): Promise<{ ok: boolean; rows: ExportContactRow[] }> {
+export interface ExportCampaignInfo {
+  id: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  createdAt: number;
+}
+
+export interface ExportCampaignContactRow extends ExportContactRow {
+  contactId: string;
+  assignedAt?: number;
+}
+
+export interface ExportCampaignGroup {
+  campaign: ExportCampaignInfo;
+  contacts: ExportCampaignContactRow[];
+}
+
+export async function exportContacts(
+  contactIds: string[],
+  campaignIds?: string[],
+): Promise<{ ok: boolean; rows: ExportContactRow[]; byCampaign?: ExportCampaignGroup[] }> {
   return api('/contacts/export', {
     method: 'POST',
-    body: JSON.stringify({ contactIds }),
+    body: JSON.stringify({ contactIds, campaignIds }),
+  });
+}
+
+export async function getCampaignContactMap(
+  campaignIds: string[],
+): Promise<{ ok: boolean; byCampaign: Record<string, string[]> }> {
+  return api('/contacts/campaign-contacts', {
+    method: 'POST',
+    body: JSON.stringify({ campaignIds }),
   });
 }
 

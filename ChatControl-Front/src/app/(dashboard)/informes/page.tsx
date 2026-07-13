@@ -8,8 +8,11 @@ import {
   getMe,
   getContactsList,
   exportContacts,
+  getCampaigns,
+  getCampaignContactMap,
   type ContactItem,
   type MeResponse,
+  type Campaign,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 
@@ -134,6 +137,18 @@ export default function InformesPage() {
   const [exportSuccess, setExportSuccess] = useState(false);
   const [exportError, setExportError] = useState('');
 
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
+  const [campaignContactMap, setCampaignContactMap] = useState<Record<string, string[]>>({});
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [campaignSearch, setCampaignSearch] = useState('');
+
+  const filteredCampaigns = campaigns.filter(c =>
+    !campaignSearch.trim() ||
+    c.name.toLowerCase().includes(campaignSearch.toLowerCase()) ||
+    (c.description?.toLowerCase().includes(campaignSearch.toLowerCase()) ?? false)
+  );
+
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
@@ -141,11 +156,24 @@ export default function InformesPage() {
     if (!isLoggedIn()) { router.replace('/login'); return; }
     (async () => {
       setLoading(true);
+      setLoadingCampaigns(true);
       try {
-        const [list, meData] = await Promise.all([getContactsList(), getMe()]);
+        const [list, meData, campaignsData] = await Promise.all([
+          getContactsList(),
+          getMe(),
+          getCampaigns(),
+        ]);
         setContacts(list);
         setMe(meData);
-      } catch (err) { } finally { setLoading(false); }
+        setCampaigns(campaignsData);
+
+        // Precargar mapa campaña → contactos para todas las campañas
+        if (campaignsData.length > 0) {
+          const allIds = campaignsData.map(c => c.id);
+          const res = await getCampaignContactMap(allIds);
+          setCampaignContactMap(res.byCampaign);
+        }
+      } catch (err) { } finally { setLoading(false); setLoadingCampaigns(false); }
     })();
   }, [mounted, router]);
 
@@ -173,6 +201,24 @@ export default function InformesPage() {
     setSelectedIds(next);
   };
 
+  const toggleCampaign = (campaignId: string) => {
+    const nextCampaigns = new Set(selectedCampaignIds);
+    const nextContacts = new Set(selectedIds);
+
+    if (nextCampaigns.has(campaignId)) {
+      nextCampaigns.delete(campaignId);
+      const toRemove = campaignContactMap[campaignId] || [];
+      for (const cid of toRemove) nextContacts.delete(cid);
+    } else {
+      nextCampaigns.add(campaignId);
+      const ids = campaignContactMap[campaignId] || [];
+      for (const cid of ids) nextContacts.add(cid);
+    }
+
+    setSelectedCampaignIds(nextCampaigns);
+    setSelectedIds(nextContacts);
+  };
+
   const handleExport = async () => {
     if (selectedIds.size === 0) return;
     setExporting(true);
@@ -180,25 +226,54 @@ export default function InformesPage() {
     setExportError('');
     try {
       const ids = Array.from(selectedIds);
-      const { rows } = await exportContacts(ids);
+      const campaignIds = selectedCampaignIds.size > 0 ? Array.from(selectedCampaignIds) : undefined;
+      const { rows, byCampaign } = await exportContacts(ids, campaignIds);
 
-      // Use namespace import to avoid issues with default export
       const XLSX = await import('xlsx');
-
-      const worksheetData = [
-        ['Campaña', 'Formulario', 'Correo Electrónico', 'Nombre', 'Número de Teléfono', 'Agente'],
-        ...rows.map(r => [r.campaign_name, r.form_name, r.email, r.name, r.phone, r.agent]),
-      ];
-
-      const ws = XLSX.utils.aoa_to_sheet(worksheetData);
-      ws['!cols'] = [
-        { wch: 25 }, { wch: 20 }, { wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 25 },
-      ];
-
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Contactos');
-
       const date = new Date().toISOString().split('T')[0];
+
+      const COL_HEADERS_CAMPAIGN = ['Campaña', 'Descripción', 'Fecha Campaña', 'Fecha Asignación', 'Formulario', 'Correo Electrónico', 'Nombre', 'Número de Teléfono', 'Agente'];
+      const COL_HEADERS_FLAT = ['Campaña', 'Formulario', 'Correo Electrónico', 'Nombre', 'Número de Teléfono', 'Agente'];
+
+      if (byCampaign && byCampaign.length > 0) {
+        // Una hoja por campaña
+        for (const group of byCampaign) {
+          const sheetName = group.campaign.name.slice(0, 31);
+          const data = [
+            COL_HEADERS_CAMPAIGN,
+            ...group.contacts.map(r => [
+              r.campaign_name,
+              group.campaign.description || '',
+              new Date(group.campaign.createdAt).toLocaleDateString(),
+              r.assignedAt ? new Date(r.assignedAt).toLocaleString() : '',
+              r.form_name,
+              r.email,
+              r.name,
+              r.phone,
+              r.agent,
+            ]),
+          ];
+          const ws = XLSX.utils.aoa_to_sheet(data);
+          ws['!cols'] = [
+            { wch: 25 }, { wch: 30 }, { wch: 15 }, { wch: 20 },
+            { wch: 20 }, { wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 25 },
+          ];
+          XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        }
+      } else {
+        // Exportación plana (comportamiento original)
+        const worksheetData = [
+          COL_HEADERS_FLAT,
+          ...rows.map(r => [r.campaign_name, r.form_name, r.email, r.name, r.phone, r.agent]),
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(worksheetData);
+        ws['!cols'] = [
+          { wch: 25 }, { wch: 20 }, { wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 25 },
+        ];
+        XLSX.utils.book_append_sheet(wb, ws, 'Contactos');
+      }
+
       XLSX.writeFile(wb, `informe_contactos_${date}.xlsx`);
 
       setExportSuccess(true);
@@ -269,6 +344,56 @@ export default function InformesPage() {
               <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#777', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 Seleccionar todos ({filtered.length})
               </span>
+            </div>
+          )}
+
+          {/* Campaign filter */}
+          {!loading && campaigns.length > 0 && (
+            <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.75rem', borderRadius: '10px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <p style={{ margin: '0 0 0.5rem', fontSize: '0.65rem', fontWeight: 800, color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                Filtrar por campaña
+              </p>
+
+              {/* Search dentro del filtro */}
+              <div style={{ position: 'relative', marginBottom: '0.5rem' }}>
+                <SearchIcon style={{ position: 'absolute', left: '0.5rem', top: '50%', transform: 'translateY(-50%)', color: '#444', width: '0.75rem', height: '0.75rem' }} />
+                <input
+                  type="text"
+                  placeholder="Buscar campaña..."
+                  value={campaignSearch}
+                  onChange={(e) => setCampaignSearch(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '0.4rem 0.5rem 0.4rem 1.6rem', color: 'white', outline: 'none', fontSize: '0.72rem', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {/* Lista de campañas filtrada */}
+              <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                {filteredCampaigns.length === 0 ? (
+                  <p style={{ fontSize: '0.7rem', color: '#555', padding: '0.5rem 0', textAlign: 'center' }}>
+                    {campaignSearch ? 'Sin resultados' : 'Sin campañas'}
+                  </p>
+                ) : filteredCampaigns.map(c => {
+                  const isCampaignSelected = selectedCampaignIds.has(c.id);
+                  const contactCount = campaignContactMap[c.id]?.length || 0;
+                  return (
+                    <div
+                      key={c.id}
+                      onClick={() => toggleCampaign(c.id)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.25rem', borderRadius: '6px', cursor: 'pointer', userSelect: 'none', opacity: c.isActive ? 1 : 0.55 }}
+                    >
+                      <div style={{ width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0, border: `2px solid ${isCampaignSelected ? '#EF4444' : 'rgba(255,255,255,0.15)'}`, background: isCampaignSelected ? '#EF4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease' }}>
+                        {isCampaignSelected && <CheckIcon />}
+                      </div>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: isCampaignSelected ? '#FFF' : '#AAA', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {c.name}
+                      </span>
+                      <span style={{ fontSize: '0.6rem', color: '#555' }}>{contactCount}</span>
+                      {c.isActive && <span style={{ fontSize: '0.6rem', fontWeight: 800, color: '#4ADE80', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Activa</span>}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
