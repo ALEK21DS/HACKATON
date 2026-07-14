@@ -172,8 +172,9 @@ export async function getMessages(conversationId: string, cursor?: string): Prom
   return api<{messages: Message[], nextCursor: string | null}>(`/chat/conversations/${conversationId}/messages${q}`);
 }
 
-export async function getGallery(conversationId: string): Promise<Message[]> {
-  return api<Message[]>(`/chat/conversations/${conversationId}/gallery`);
+export async function getGallery(conversationId: string, cursor?: string): Promise<{ items: Message[]; nextCursor: string | null }> {
+  const q = cursor ? `?cursor=${cursor}` : '';
+  return api<{ items: Message[]; nextCursor: string | null }>(`/chat/conversations/${conversationId}/gallery${q}`);
 }
 
 export async function searchMessages(conversationId: string, query: string): Promise<Message[]> {
@@ -267,8 +268,28 @@ export interface BroadcastTemplate {
 
 export type BroadcastMessageType = 'manual' | 'template' | 'ia';
 
-export async function getBroadcastContacts(): Promise<BroadcastContact[]> {
-  return api<BroadcastContact[]>('/broadcast/contacts');
+export interface BroadcastContactsPage {
+  contacts: BroadcastContact[];
+  nextCursor: string | null;
+  total: number;
+}
+
+export async function getBroadcastContacts(params?: { cursor?: string; limit?: number; q?: string }): Promise<BroadcastContactsPage> {
+  const qs = new URLSearchParams();
+  if (params?.cursor) qs.set('cursor', params.cursor);
+  if (params?.limit) qs.set('limit', String(params.limit));
+  if (params?.q?.trim()) qs.set('q', params.q.trim());
+  const query = qs.toString();
+  return api<BroadcastContactsPage>(`/broadcast/contacts${query ? `?${query}` : ''}`);
+}
+
+export async function getBroadcastContactIds(params?: { q?: string; onlyCanSend?: boolean }): Promise<string[]> {
+  const qs = new URLSearchParams();
+  if (params?.q?.trim()) qs.set('q', params.q.trim());
+  if (params?.onlyCanSend) qs.set('onlyCanSend', 'true');
+  const query = qs.toString();
+  const res = await api<{ ids: string[] }>(`/broadcast/contacts/ids${query ? `?${query}` : ''}`);
+  return res.ids;
 }
 
 export async function getBroadcastTemplates(): Promise<BroadcastTemplate[]> {
@@ -305,8 +326,29 @@ export interface ContactItem {
   createdAt: number;
 }
 
-export async function getContactsList(): Promise<ContactItem[]> {
-  return api<ContactItem[]>('/contacts');
+export interface ContactsPage {
+  contacts: ContactItem[];
+  nextCursor: string | null;
+  total: number;
+}
+
+export async function getContactsList(params?: { cursor?: string; limit?: number; q?: string; campaignIds?: string[] }): Promise<ContactsPage> {
+  const qs = new URLSearchParams();
+  if (params?.cursor) qs.set('cursor', params.cursor);
+  if (params?.limit) qs.set('limit', String(params.limit));
+  if (params?.q?.trim()) qs.set('q', params.q.trim());
+  if (params?.campaignIds?.length) qs.set('campaignIds', params.campaignIds.join(','));
+  const query = qs.toString();
+  return api<ContactsPage>(`/contacts${query ? `?${query}` : ''}`);
+}
+
+export async function getContactIds(params?: { q?: string; campaignIds?: string[] }): Promise<string[]> {
+  const qs = new URLSearchParams();
+  if (params?.q?.trim()) qs.set('q', params.q.trim());
+  if (params?.campaignIds?.length) qs.set('campaignIds', params.campaignIds.join(','));
+  const query = qs.toString();
+  const res = await api<{ ids: string[] }>(`/contacts/ids${query ? `?${query}` : ''}`);
+  return res.ids;
 }
 
 export async function getContact(id: string): Promise<{ ok: boolean; contact: ContactItem | null }> {

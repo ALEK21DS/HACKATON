@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -17,8 +17,34 @@ export class ContactsController {
   constructor(private readonly contacts: ContactsService) {}
 
   @Get()
-  async findAll(@CurrentUser() user: AuthUser) {
-    return this.contacts.findAll(user.organizationId!, user.userId, user.role);
+  async findAll(
+    @CurrentUser() user: AuthUser,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+    @Query('q') q?: string,
+    @Query('campaignIds') campaignIds?: string,
+  ) {
+    return this.contacts.findAll(
+      user.organizationId!,
+      user.userId,
+      user.role,
+      { q, campaignIds: campaignIds ? campaignIds.split(',').filter(Boolean) : undefined },
+      cursor,
+      limit ? parseInt(limit, 10) : undefined,
+    );
+  }
+
+  @Get('ids')
+  async findAllIds(
+    @CurrentUser() user: AuthUser,
+    @Query('q') q?: string,
+    @Query('campaignIds') campaignIds?: string,
+  ) {
+    const ids = await this.contacts.findAllIds(user.organizationId!, user.userId, user.role, {
+      q,
+      campaignIds: campaignIds ? campaignIds.split(',').filter(Boolean) : undefined,
+    });
+    return { ids };
   }
 
   @Get(':id')

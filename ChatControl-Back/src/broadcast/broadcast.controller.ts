@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -17,8 +17,33 @@ export class BroadcastController {
   constructor(private readonly broadcast: BroadcastService) {}
 
   @Get('contacts')
-  async getContacts(@CurrentUser() user: AuthUser) {
-    return this.broadcast.getContacts(user.organizationId!, user.userId, user.role);
+  async getContacts(
+    @CurrentUser() user: AuthUser,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+    @Query('q') q?: string,
+  ) {
+    return this.broadcast.getContacts(
+      user.organizationId!,
+      user.userId,
+      user.role,
+      { q },
+      cursor,
+      limit ? parseInt(limit, 10) : undefined,
+    );
+  }
+
+  @Get('contacts/ids')
+  async getContactIds(
+    @CurrentUser() user: AuthUser,
+    @Query('q') q?: string,
+    @Query('onlyCanSend') onlyCanSend?: string,
+  ) {
+    const ids = await this.broadcast.getAllContactIds(user.organizationId!, user.userId, user.role, {
+      q,
+      onlyCanSend: onlyCanSend === 'true',
+    });
+    return { ids };
   }
 
   @Get('templates')

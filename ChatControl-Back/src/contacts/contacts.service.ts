@@ -14,29 +14,83 @@ function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, '');
 }
 
+export interface ContactsFilter {
+  q?: string;
+  campaignIds?: string[];
+}
+
+const MAX_PAGE_SIZE = 200;
+const DEFAULT_PAGE_SIZE = 50;
+
 @Injectable()
 export class ContactsService {
   constructor(private readonly prisma: PrismaService) { }
 
-  async findAll(organizationId: string, userId?: string, userRole?: string): Promise<ContactDto[]> {
+  private buildWhere(organizationId: string, userId?: string, userRole?: string, filter?: ContactsFilter) {
     const where: any = { organizationId };
     if (userRole === 'AGENT' && userId) {
       where.conversations = {
         some: { assignedToUserId: userId }
       };
     }
-    const list = await this.prisma.contact.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
-    return list.map((c) => ({
-      id: c.id,
-      phone: c.phone,
-      name: c.name,
-      email: c.email,
-      isSandboxAuthorized: c.isSandboxAuthorized,
-      createdAt: c.createdAt.getTime(),
-    }));
+    if (filter?.q?.trim()) {
+      const q = filter.q.trim();
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { phone: { contains: q } },
+        { email: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+    if (filter?.campaignIds?.length) {
+      where.campaignId = { in: filter.campaignIds };
+    }
+    return where;
+  }
+
+  async findAll(
+    organizationId: string,
+    userId?: string,
+    userRole?: string,
+    filter?: ContactsFilter,
+    cursor?: string,
+    limit?: number,
+  ): Promise<{ contacts: ContactDto[]; nextCursor: string | null; total: number }> {
+    const where = this.buildWhere(organizationId, userId, userRole, filter);
+    const take = limit && limit > 0 ? Math.min(limit, MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
+
+    const [rows, total] = await Promise.all([
+      this.prisma.contact.findMany({
+        where,
+        take: take + 1,
+        cursor: cursor ? { id: cursor } : undefined,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.contact.count({ where }),
+    ]);
+
+    let nextCursor: string | null = null;
+    if (rows.length > take) {
+      nextCursor = rows.pop()!.id;
+    }
+
+    return {
+      contacts: rows.map((c) => ({
+        id: c.id,
+        phone: c.phone,
+        name: c.name,
+        email: c.email,
+        isSandboxAuthorized: c.isSandboxAuthorized,
+        createdAt: c.createdAt.getTime(),
+      })),
+      nextCursor,
+      total,
+    };
+  }
+
+  async findAllIds(organizationId: string, userId?: string, userRole?: string, filter?: ContactsFilter): Promise<string[]> {
+    const where = this.buildWhere(organizationId, userId, userRole, filter);
+    const rows = await this.prisma.contact.findMany({ where, select: { id: true } });
+    return rows.map((r) => r.id);
   }
 
   async createOrUpdate(
