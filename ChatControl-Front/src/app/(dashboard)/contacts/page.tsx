@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/shared/ui/spinner';
 import { useRouter } from 'next/navigation';
 import {
@@ -12,6 +12,8 @@ import {
   type ContactItem,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
+
+const PAGE_SIZE = 50;
 
 // --- Icons ---
 function PersonIcon({ style }: { style?: React.CSSProperties }) {
@@ -42,6 +44,9 @@ export default function ContactsPage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [contacts, setContacts] = useState<ContactItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -52,27 +57,58 @@ export default function ContactsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [searchQuery]);
+
+  async function loadFirstPage(q: string) {
+    setLoading(true);
+    try {
+      const page = await getContactsList({ q, limit: PAGE_SIZE });
+      setContacts(page.contacts);
+      setNextCursor(page.nextCursor);
+      setTotal(page.total);
+    } catch (err) {} finally { setLoading(false); }
+  }
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await getContactsList({ q: debouncedQuery, limit: PAGE_SIZE, cursor: nextCursor });
+      setContacts(prev => [...prev, ...page.contacts]);
+      setNextCursor(page.nextCursor);
+      setTotal(page.total);
+    } catch (err) {} finally { setLoadingMore(false); }
+  }
+
+  useEffect(() => {
     if (!mounted) return;
     if (!isLoggedIn()) { router.replace('/login'); return; }
-    (async () => {
-      setLoading(true);
-      try {
-        const [list, me] = await Promise.all([
-          getContactsList(),
-          getMe().catch(() => null)
-        ]);
-        setContacts(list);
-        if (me && me.isSandbox !== undefined) {
-          setIsSandbox(me.isSandbox);
-        }
-      } catch (err) {} finally { setLoading(false); }
-    })();
+    getMe().then(me => {
+      if (me.isSandbox !== undefined) setIsSandbox(me.isSandbox);
+    }).catch(() => {});
   }, [mounted, router]);
+
+  useEffect(() => {
+    if (!mounted || !isLoggedIn()) return;
+    loadFirstPage(debouncedQuery);
+  }, [mounted, debouncedQuery]);
+
+  function handleListScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 150) {
+      loadMore();
+    }
+  }
 
   const selectedContact = contacts.find((c) => c.id === selectedId);
 
@@ -112,18 +148,13 @@ export default function ContactsPage() {
         const { contact } = await createContact({ phone: phoneNorm, name: name.trim() || undefined, email: email.trim() || undefined, isSandboxAuthorized });
         setSelectedId(contact.id);
       }
-      const list = await getContactsList();
-      setContacts(list);
+      await loadFirstPage(debouncedQuery);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al guardar');
     } finally {
       setSaving(false);
     }
   };
-
-  const filteredContacts = contacts.filter(c =>
-    c.phone.includes(searchQuery) || (c.name?.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
 
   if (!mounted) return null;
 
@@ -161,7 +192,7 @@ export default function ContactsPage() {
           </button>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }} className="custom-scrollbar">
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }} className="custom-scrollbar" onScroll={handleListScroll}>
           {loading ? (
             <div style={{ padding: '4rem 2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
               <div className="pulse-heartbeat">
@@ -171,7 +202,7 @@ export default function ContactsPage() {
               </div>
               <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.2em' }}>Sincronizando</span>
             </div>
-          ) : filteredContacts.map(c => (
+          ) : contacts.map(c => (
             <button
               key={c.id}
               onClick={() => setSelectedId(c.id)}
@@ -204,6 +235,16 @@ export default function ContactsPage() {
               </div>
             </button>
           ))}
+          {!loading && loadingMore && (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '1rem 0' }}>
+              <Spinner size={18} />
+            </div>
+          )}
+          {!loading && !nextCursor && contacts.length > 0 && (
+            <p style={{ textAlign: 'center', fontSize: '0.65rem', color: '#333', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', padding: '1rem 0 0.5rem' }}>
+              {total} contacto{total !== 1 ? 's' : ''} en total
+            </p>
+          )}
         </div>
       </aside>
 

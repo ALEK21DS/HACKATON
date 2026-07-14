@@ -143,6 +143,8 @@ export default function ChatPage() {
   const [updatingContact, setUpdatingContact] = useState(false);
   const [gallery, setGallery] = useState<Message[]>([]);
   const [loadingGallery, setLoadingGallery] = useState(false);
+  const [galleryNextCursor, setGalleryNextCursor] = useState<string | null>(null);
+  const [loadingMoreGallery, setLoadingMoreGallery] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const [orgUsers, setOrgUsers] = useState<Array<{ id: string; email: string; displayName: string | null; role: string }>>([]);
@@ -162,6 +164,8 @@ export default function ChatPage() {
   const myUserRoleRef = useRef<string | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isLoadingOlderRef = useRef(false);
+  const prevScrollHeightRef = useRef(0);
   const sendingRef = useRef(false);
   // Set de IDs de mensajes que ya fueron procesados vía respuesta de API (para que el WebSocket no los duplique)
   const recentlySentIdsRef = useRef<Set<string>>(new Set());
@@ -262,6 +266,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!selectedId) return;
+    isLoadingOlderRef.current = false;
     (async () => {
       setLoadingMessages(true);
       try {
@@ -281,9 +286,38 @@ export default function ChatPage() {
 
   useEffect(() => {
     const el = messagesContainerRef.current;
-    if (!el || loadingMore) return;
+    if (!el) return;
+    if (isLoadingOlderRef.current) {
+      // Mantiene la posición de scroll al insertar mensajes antiguos arriba
+      el.scrollTop = el.scrollHeight - prevScrollHeightRef.current;
+      isLoadingOlderRef.current = false;
+      return;
+    }
     el.scrollTop = el.scrollHeight;
-  }, [messages, selectedId, loadingMore]);
+  }, [messages, selectedId]);
+
+  async function loadMoreMessages() {
+    if (!selectedId || !nextCursor || loadingMore) return;
+    const el = messagesContainerRef.current;
+    prevScrollHeightRef.current = el?.scrollHeight ?? 0;
+    isLoadingOlderRef.current = true;
+    setLoadingMore(true);
+    try {
+      const res = await getMessages(selectedId, nextCursor);
+      setMessages(prev => [...res.messages, ...prev]);
+      setNextCursor(res.nextCursor);
+    } catch (err) {
+      isLoadingOlderRef.current = false;
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  function handleMessagesScroll(e: React.UIEvent<HTMLDivElement>) {
+    if (e.currentTarget.scrollTop < 80 && nextCursor && !loadingMore && !loadingMessages) {
+      loadMoreMessages();
+    }
+  }
 
   async function loadConversations(showLoading = true) {
     if (showLoading) setLoading(true);
@@ -454,14 +488,34 @@ export default function ChatPage() {
       setEditEmail(selectedConv.email || '');
       setEditSandbox(selectedConv.isSandboxAuthorized || false);
     }
+  }, [selectedConv]);
+
+  useEffect(() => {
     if (selectedId && detailsOpen) {
       setLoadingGallery(true);
       getGallery(selectedId)
-        .then(res => setGallery(res))
+        .then(res => { setGallery(res.items); setGalleryNextCursor(res.nextCursor); })
         .catch(() => {})
         .finally(() => setLoadingGallery(false));
     }
-  }, [selectedId, detailsOpen, selectedConv]);
+  }, [selectedId, detailsOpen]);
+
+  async function loadMoreGallery() {
+    if (!selectedId || !galleryNextCursor || loadingMoreGallery) return;
+    setLoadingMoreGallery(true);
+    try {
+      const res = await getGallery(selectedId, galleryNextCursor);
+      setGallery(prev => [...prev, ...res.items]);
+      setGalleryNextCursor(res.nextCursor);
+    } catch (err) {} finally { setLoadingMoreGallery(false); }
+  }
+
+  function handleDetailsScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 150) {
+      loadMoreGallery();
+    }
+  }
 
   async function handleUpdateContact(e: React.FormEvent) {
     e.preventDefault();
@@ -637,9 +691,10 @@ export default function ChatPage() {
             </header>
 
             {/* Mensajes */}
-            <div 
+            <div
               ref={messagesContainerRef}
-              style={{ flex: 1, overflowY: 'auto', padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', position: 'relative' }} 
+              onScroll={handleMessagesScroll}
+              style={{ flex: 1, overflowY: 'auto', padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', position: 'relative' }}
               className="custom-scrollbar"
             >
               {loadingMessages ? (
@@ -653,6 +708,11 @@ export default function ChatPage() {
                 </div>
               ) : (
                 <>
+                  {loadingMore && (
+                    <div style={{ display: 'flex', justifyContent: 'center', padding: '0.5rem 0' }}>
+                      <Spinner size={18} />
+                    </div>
+                  )}
                   {messages.map((m, index) => {
                     const previousMessage = messages[index - 1];
                     const startsNewDay = !previousMessage || !isSameLocalDay(m.timestamp, previousMessage.timestamp);
@@ -885,7 +945,7 @@ export default function ChatPage() {
           zIndex: 15,
           padding: '1.5rem',
           animation: 'slideInRight 0.3s ease-out',
-        }} className="custom-scrollbar">
+        }} className="custom-scrollbar" onScroll={handleDetailsScroll}>
           {/* Cabecera */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, color: '#EF4444' }}>
@@ -1000,13 +1060,13 @@ export default function ChatPage() {
                         onClick={() => setLightboxUrl(g.mediaUrl!)}
                         style={{ aspectRatio: '1', borderRadius: '8px', overflow: 'hidden', background: '#1A1A1A', border: '1px solid rgba(255,255,255,0.05)', cursor: 'zoom-in' }}
                       >
-                        <img src={g.mediaUrl} alt="galería" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <img src={g.mediaUrl} alt="galería" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       </div>
                     );
                   } else if (g.type === 'VIDEO' && g.mediaUrl) {
                     return (
                       <div key={g.id} style={{ aspectRatio: '1', borderRadius: '8px', overflow: 'hidden', background: '#1A1A1A', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                        <video src={g.mediaUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <video src={g.mediaUrl} preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }}>
                           <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
                         </div>
@@ -1031,6 +1091,11 @@ export default function ChatPage() {
                   }
                   return null;
                 })}
+              </div>
+            )}
+            {loadingMoreGallery && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '0.75rem 0' }}>
+                <Spinner size={18} />
               </div>
             )}
           </div>

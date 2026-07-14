@@ -8,6 +8,7 @@ import {
   isLoggedIn,
   getMe,
   getBroadcastContacts,
+  getBroadcastContactIds,
   getBroadcastTemplates,
   generateBroadcastMessage,
   sendBroadcast,
@@ -21,6 +22,8 @@ import {
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
+
+const PAGE_SIZE = 50;
 
 const WS_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/api$/, '');
 
@@ -64,6 +67,10 @@ export default function BroadcastPage() {
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
   const [contacts, setContacts] = useState<BroadcastContact[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [total, setTotal] = useState(0);
+  const [matchingIds, setMatchingIds] = useState<string[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [templates, setTemplates] = useState<BroadcastTemplate[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [messageType, setMessageType] = useState<BroadcastMessageType>('manual');
@@ -81,6 +88,8 @@ export default function BroadcastPage() {
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const socketRef = useRef<Socket | null>(null);
 
@@ -96,6 +105,12 @@ export default function BroadcastPage() {
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [searchQuery]);
+
+  useEffect(() => {
     if (!mounted) return;
     if (!isLoggedIn()) { router.replace('/login'); return; }
     const initialSource = searchParams?.get('source');
@@ -109,13 +124,51 @@ export default function BroadcastPage() {
     (async () => {
       setLoading(true);
       try {
-        const [cl, tl] = await Promise.all([getBroadcastContacts(), getBroadcastTemplates()]);
-        setContacts(cl);
+        const tl = await getBroadcastTemplates();
         setTemplates(tl);
         await loadCrmLists();
       } catch (err) {} finally { setLoading(false); }
     })();
   }, [mounted, router, searchParams, loadCrmLists]);
+
+  const onlyCanSend = messageType !== 'template';
+
+  async function loadFirstPage(q: string) {
+    setLoading(true);
+    try {
+      const [page, ids] = await Promise.all([
+        getBroadcastContacts({ q, limit: PAGE_SIZE }),
+        getBroadcastContactIds({ q, onlyCanSend }),
+      ]);
+      setContacts(page.contacts);
+      setNextCursor(page.nextCursor);
+      setTotal(page.total);
+      setMatchingIds(ids);
+    } catch (err) {} finally { setLoading(false); }
+  }
+
+  async function loadMoreContacts() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await getBroadcastContacts({ q: debouncedQuery, limit: PAGE_SIZE, cursor: nextCursor });
+      setContacts(prev => [...prev, ...page.contacts]);
+      setNextCursor(page.nextCursor);
+      setTotal(page.total);
+    } catch (err) {} finally { setLoadingMore(false); }
+  }
+
+  useEffect(() => {
+    if (!mounted || !isLoggedIn() || contactSource !== 'manual') return;
+    loadFirstPage(debouncedQuery);
+  }, [mounted, debouncedQuery, contactSource, onlyCanSend]);
+
+  function handleContactListScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 150) {
+      loadMoreContacts();
+    }
+  }
 
   const refreshListPreview = useCallback(async (listIds: string[]) => {
     if (!listIds.length) {
@@ -172,20 +225,22 @@ export default function BroadcastPage() {
     });
   };
 
+  const allMatchingSelected = matchingIds.length > 0 && matchingIds.every(id => selectedIds.has(id));
+
   const toggleAll = () => {
-    const allowedContacts = contacts.filter(c => messageType === 'template' || c.canSend);
-    const allAllowedSelected = allowedContacts.every(c => selectedIds.has(c.id));
+    const allowedContacts = matchingIds;
+    const allAllowedSelected = allMatchingSelected;
 
     if (allAllowedSelected) {
       setSelectedIds(prev => {
         const next = new Set(prev);
-        allowedContacts.forEach(c => next.delete(c.id));
+        allowedContacts.forEach(id => next.delete(id));
         return next;
       });
     } else {
       setSelectedIds(prev => {
         const next = new Set(prev);
-        allowedContacts.forEach(c => next.add(c.id));
+        allowedContacts.forEach(id => next.add(id));
         return next;
       });
     }
@@ -230,17 +285,13 @@ export default function BroadcastPage() {
     setSelectedListIds(new Set());
     setListPreview(null);
     if (source === 'segments') {
-      setSelectedIds(new Set(contacts.map((c) => c.id)));
-    } else if (source === 'manual') {
       setSelectedIds(new Set());
+      setLoadingList(true);
+      getBroadcastContactIds({}).then(ids => setSelectedIds(new Set(ids))).catch(() => {}).finally(() => setLoadingList(false));
     } else {
       setSelectedIds(new Set());
     }
   };
-
-  const filteredContacts = contacts.filter(c => 
-    c.phone.includes(searchQuery) || (c.name?.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
 
   const selectedTemplate = templates.find(t => t.id === templateId);
 
@@ -354,11 +405,11 @@ export default function BroadcastPage() {
               )}
             </div>
           ) : contactSource === 'manual' ? (
-            <button 
+            <button
               onClick={toggleAll}
               style={{ width: '100%', padding: '0.6rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', color: '#8C8C8C', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '0.75rem' }}
             >
-              {selectedIds.size === contacts.length ? 'Desmarcar todos' : 'Seleccionar todos'}
+              {allMatchingSelected ? `Desmarcar todos (${total})` : `Seleccionar todos (${total})`}
             </button>
           ) : (
             <div style={{ padding: '0.75rem', marginBottom: '0.75rem', borderRadius: 10, background: 'rgba(239,68,68,0.06)', color: '#EF4444', fontSize: '0.75rem', fontWeight: 700 }}>
@@ -367,7 +418,7 @@ export default function BroadcastPage() {
           )}
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }} className="custom-scrollbar">
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }} className="custom-scrollbar" onScroll={handleContactListScroll}>
           {loading || loadingList ? (
             <div style={{ padding: '4rem 2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
               <div className="pulse-heartbeat">
@@ -387,12 +438,14 @@ export default function BroadcastPage() {
             <div style={{ padding: '2rem', textAlign: 'center', color: '#22c55e', fontSize: '0.9rem', fontWeight: 700 }}>
               Segmento completo: {selectedIds.size} contactos
             </div>
-          ) : filteredContacts.map(c => {
+          ) : (
+            <>
+              {contacts.map(c => {
             const isBlocked = messageType !== 'template' && !c.canSend;
             const isSelected = selectedIds.has(c.id);
 
             return (
-              <div 
+              <div
                 key={c.id}
                 onClick={() => !isBlocked && toggleContact(c.id)}
                 style={{ 
@@ -434,8 +487,15 @@ export default function BroadcastPage() {
                   </span>
                 </div>
               </div>
-            );
-          })}
+                );
+              })}
+              {loadingMore && (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '1rem 0' }}>
+                  <Spinner size={18} />
+                </div>
+              )}
+            </>
+          )}
         </div>
       </aside>
 

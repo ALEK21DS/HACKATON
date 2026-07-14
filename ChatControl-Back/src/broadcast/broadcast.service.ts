@@ -42,27 +42,28 @@ export class BroadcastService {
     private readonly config: ConfigService,
   ) {}
 
-  async getContacts(organizationId: string, userId?: string, userRole?: string): Promise<BroadcastContact[]> {
-    const where: any = { organizationId };
-    if (userRole === 'AGENT' && userId) {
-      where.conversations = {
-        some: { assignedToUserId: userId }
-      };
-    }
-    const allContacts = await this.prisma.contact.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
+  /** Crea conversaciones para contactos que aún no tienen una, en un solo batch (evita N+1). */
+  private async ensureConversationsExist(organizationId: string): Promise<void> {
+    const missing = await this.prisma.contact.findMany({
+      where: { organizationId, conversations: { none: {} } },
+      select: { id: true },
     });
-    for (const contact of allContacts) {
-      const existing = await this.prisma.conversation.findFirst({
-        where: { contactId: contact.id },
+    if (missing.length > 0) {
+      await this.prisma.conversation.createMany({
+        data: missing.map((c) => ({ contactId: c.id })),
       });
-      if (!existing) {
-        await this.prisma.conversation.create({
-          data: { contactId: contact.id },
-        });
-      }
     }
+  }
+
+  private matchesQuery(c: { phone: string; name?: string }, q?: string): boolean {
+    if (!q?.trim()) return true;
+    const needle = q.trim().toLowerCase();
+    return c.phone.includes(q.trim()) || (c.name?.toLowerCase().includes(needle) ?? false);
+  }
+
+  /** Lista completa (sin paginar) de contactos de broadcast. Uso interno para envíos y validaciones. */
+  async getAllContacts(organizationId: string, userId?: string, userRole?: string): Promise<BroadcastContact[]> {
+    await this.ensureConversationsExist(organizationId);
     const list = await this.chat.getConversationsWithWindowStatus(organizationId, userId, userRole);
     return list.map((c) => ({
       id: c.id,
@@ -74,6 +75,42 @@ export class BroadcastService {
       lastMessageAt: c.lastMessageAt,
       isSandboxAuthorized: c.isSandboxAuthorized ?? false,
     }));
+  }
+
+  async getContacts(
+    organizationId: string,
+    userId?: string,
+    userRole?: string,
+    filter?: { q?: string },
+    cursor?: string,
+    limit?: number,
+  ): Promise<{ contacts: BroadcastContact[]; nextCursor: string | null; total: number }> {
+    const list = await this.getAllContacts(organizationId, userId, userRole);
+    const matching = list.filter((c) => this.matchesQuery(c, filter?.q));
+
+    const take = limit && limit > 0 ? Math.min(limit, 200) : 50;
+    let startIndex = 0;
+    if (cursor) {
+      const idx = matching.findIndex((c) => c.id === cursor);
+      startIndex = idx >= 0 ? idx + 1 : 0;
+    }
+    const page = matching.slice(startIndex, startIndex + take);
+    const nextCursor = startIndex + take < matching.length ? page[page.length - 1]?.id ?? null : null;
+
+    return { contacts: page, nextCursor, total: matching.length };
+  }
+
+  async getAllContactIds(
+    organizationId: string,
+    userId?: string,
+    userRole?: string,
+    filter?: { q?: string; onlyCanSend?: boolean },
+  ): Promise<string[]> {
+    const list = await this.getAllContacts(organizationId, userId, userRole);
+    return list
+      .filter((c) => this.matchesQuery(c, filter?.q))
+      .filter((c) => !filter?.onlyCanSend || c.canSend)
+      .map((c) => c.id);
   }
 
   async getTemplates(organizationId: string): Promise<BroadcastTemplate[]> {
@@ -146,7 +183,7 @@ export class BroadcastService {
       throw new BadRequestException('El mensaje no puede estar vacío');
     }
 
-    const contacts = await this.getContacts(organizationId);
+    const contacts = await this.getAllContacts(organizationId);
     const idSet = new Set(contacts.map((c) => c.id));
     const validIds = conversationIds.filter((id) => idSet.has(id));
     if (validIds.length === 0) {

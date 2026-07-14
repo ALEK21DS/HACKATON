@@ -77,8 +77,12 @@ export class ChatController {
   }
 
   @Get('conversations/:id/gallery')
-  async getGallery(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.chat.getGallery(id, user.organizationId!, user.userId, user.role);
+  async getGallery(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.chat.getGallery(id, user.organizationId!, user.userId, user.role, cursor);
   }
 
   @Get('conversations/:id/search')

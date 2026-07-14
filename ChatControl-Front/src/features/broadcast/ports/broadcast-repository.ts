@@ -1,7 +1,7 @@
-import type { BroadcastContact, BroadcastMessageType, BroadcastTemplate } from '@/shared/api/chatcontrol/client';
+import type { BroadcastContactsPage, BroadcastMessageType, BroadcastTemplate } from '@/shared/api/chatcontrol/client';
 
 export interface BroadcastRepository {
-  getBroadcastContacts(): Promise<BroadcastContact[]>;
+  getBroadcastContacts(params?: { cursor?: string; limit?: number; q?: string }): Promise<BroadcastContactsPage>;
   getBroadcastTemplates(): Promise<BroadcastTemplate[]>;
   generateBroadcastMessage(instruction: string): Promise<{ text: string; usedFallbackModel?: boolean }>;
   sendBroadcast(params: {

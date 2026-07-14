@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/shared/ui/spinner';
 import { useRouter } from 'next/navigation';
 import {
   isLoggedIn,
   getMe,
   getContactsList,
+  getContactIds,
   exportContacts,
   getCampaigns,
   getCampaignContactMap,
@@ -15,6 +16,8 @@ import {
   type Campaign,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
+
+const PAGE_SIZE = 50;
 
 // ── Icons ──────────────────────────────────────────────
 
@@ -128,10 +131,16 @@ export default function InformesPage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [contacts, setContacts] = useState<ContactItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [total, setTotal] = useState(0);
+  const [matchingIds, setMatchingIds] = useState<string[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [me, setMe] = useState<MeResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
@@ -152,18 +161,18 @@ export default function InformesPage() {
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [searchQuery]);
+
+  useEffect(() => {
     if (!mounted) return;
     if (!isLoggedIn()) { router.replace('/login'); return; }
+    setLoadingCampaigns(true);
     (async () => {
-      setLoading(true);
-      setLoadingCampaigns(true);
       try {
-        const [list, meData, campaignsData] = await Promise.all([
-          getContactsList(),
-          getMe(),
-          getCampaigns(),
-        ]);
-        setContacts(list);
+        const [meData, campaignsData] = await Promise.all([getMe(), getCampaigns()]);
         setMe(meData);
         setCampaigns(campaignsData);
 
@@ -173,23 +182,55 @@ export default function InformesPage() {
           const res = await getCampaignContactMap(allIds);
           setCampaignContactMap(res.byCampaign);
         }
-      } catch (err) { } finally { setLoading(false); setLoadingCampaigns(false); }
+      } catch (err) { } finally { setLoadingCampaigns(false); }
     })();
   }, [mounted, router]);
 
-  const filtered = contacts.filter(c =>
-    c.phone.includes(searchQuery) ||
-    (c.name?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
-  );
+  async function loadFirstPage(q: string, campaignIds: string[]) {
+    setLoading(true);
+    try {
+      const [page, ids] = await Promise.all([
+        getContactsList({ q, campaignIds, limit: PAGE_SIZE }),
+        getContactIds({ q, campaignIds }),
+      ]);
+      setContacts(page.contacts);
+      setNextCursor(page.nextCursor);
+      setTotal(page.total);
+      setMatchingIds(ids);
+    } catch (err) { } finally { setLoading(false); }
+  }
 
-  const allSelected = filtered.length > 0 && filtered.every(c => selectedIds.has(c.id));
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await getContactsList({ q: debouncedQuery, campaignIds: Array.from(selectedCampaignIds), limit: PAGE_SIZE, cursor: nextCursor });
+      setContacts(prev => [...prev, ...page.contacts]);
+      setNextCursor(page.nextCursor);
+      setTotal(page.total);
+    } catch (err) { } finally { setLoadingMore(false); }
+  }
+
+  useEffect(() => {
+    if (!mounted || !isLoggedIn()) return;
+    loadFirstPage(debouncedQuery, Array.from(selectedCampaignIds));
+  }, [mounted, debouncedQuery, selectedCampaignIds]);
+
+  function handleListScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 150) {
+      loadMore();
+    }
+  }
+
+  const allSelected = matchingIds.length > 0 && matchingIds.every(id => selectedIds.has(id));
 
   const toggleAll = () => {
     const next = new Set(selectedIds);
     if (allSelected) {
-      filtered.forEach(c => next.delete(c.id));
+      matchingIds.forEach(id => next.delete(id));
     } else {
-      filtered.forEach(c => next.add(c.id));
+      matchingIds.forEach(id => next.add(id));
     }
     setSelectedIds(next);
   };
@@ -333,7 +374,7 @@ export default function InformesPage() {
           </div>
 
           {/* Select all row */}
-          {!loading && filtered.length > 0 && (
+          {!loading && total > 0 && (
             <div
               onClick={toggleAll}
               style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.65rem 0.75rem', borderRadius: '10px', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', transition: 'all 0.15s ease', userSelect: 'none' }}
@@ -342,7 +383,7 @@ export default function InformesPage() {
                 {allSelected && <CheckIcon />}
               </div>
               <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#777', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                Seleccionar todos ({filtered.length})
+                Seleccionar todos ({total})
               </span>
             </div>
           )}
@@ -399,39 +440,48 @@ export default function InformesPage() {
         </div>
 
         {/* Contact list */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }} className="custom-scrollbar">
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }} className="custom-scrollbar" onScroll={handleListScroll}>
           {loading ? (
             <div style={{ padding: '4rem 2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
               <Spinner />
               <span style={{ fontSize: '0.72rem', color: '#333', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cargando contactos...</span>
             </div>
-          ) : filtered.length === 0 ? (
+          ) : contacts.length === 0 ? (
             <div style={{ padding: '3rem 2rem', textAlign: 'center', color: '#333' }}>
               <p style={{ fontSize: '0.85rem' }}>No se encontraron contactos.</p>
             </div>
-          ) : filtered.map(c => {
-            const sel = selectedIds.has(c.id);
-            return (
-              <div
-                key={c.id}
-                onClick={() => toggleOne(c.id)}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.85rem 0.9rem', borderRadius: '12px', marginBottom: '0.2rem', cursor: 'pointer', background: sel ? 'rgba(239,68,68,0.06)' : 'transparent', border: `1px solid ${sel ? 'rgba(239,68,68,0.18)' : 'transparent'}`, transition: 'all 0.15s ease', userSelect: 'none' }}
-              >
-                <div style={{ width: '18px', height: '18px', borderRadius: '5px', flexShrink: 0, border: `2px solid ${sel ? '#EF4444' : 'rgba(255,255,255,0.12)'}`, background: sel ? '#EF4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease' }}>
-                  {sel && <CheckIcon />}
+          ) : (
+            <>
+              {contacts.map(c => {
+                const sel = selectedIds.has(c.id);
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => toggleOne(c.id)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.85rem 0.9rem', borderRadius: '12px', marginBottom: '0.2rem', cursor: 'pointer', background: sel ? 'rgba(239,68,68,0.06)' : 'transparent', border: `1px solid ${sel ? 'rgba(239,68,68,0.18)' : 'transparent'}`, transition: 'all 0.15s ease', userSelect: 'none' }}
+                  >
+                    <div style={{ width: '18px', height: '18px', borderRadius: '5px', flexShrink: 0, border: `2px solid ${sel ? '#EF4444' : 'rgba(255,255,255,0.12)'}`, background: sel ? '#EF4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease' }}>
+                      {sel && <CheckIcon />}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.88rem', color: sel ? 'white' : '#D0D0D0', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {c.name || formatPhoneDisplay(c.phone)}
+                      </span>
+                      <span style={{ fontSize: '0.72rem', color: '#555' }}>{formatPhoneDisplay(c.phone)}</span>
+                    </div>
+                    {c.email && (
+                      <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#EF4444', flexShrink: 0, opacity: 0.6 }} title="Tiene email" />
+                    )}
+                  </div>
+                );
+              })}
+              {loadingMore && (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '1rem 0' }}>
+                  <Spinner size={18} />
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontWeight: 700, fontSize: '0.88rem', color: sel ? 'white' : '#D0D0D0', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {c.name || formatPhoneDisplay(c.phone)}
-                  </span>
-                  <span style={{ fontSize: '0.72rem', color: '#555' }}>{formatPhoneDisplay(c.phone)}</span>
-                </div>
-                {c.email && (
-                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#EF4444', flexShrink: 0, opacity: 0.6 }} title="Tiene email" />
-                )}
-              </div>
-            );
-          })}
+              )}
+            </>
+          )}
         </div>
       </aside>
 

@@ -10,7 +10,7 @@ export interface ChatRepository {
     windowSecondsRemaining: number;
   }>;
   getMessages(conversationId: string, cursor?: string): Promise<{ messages: Message[]; nextCursor: string | null }>;
-  getGallery(conversationId: string): Promise<Message[]>;
+  getGallery(conversationId: string, cursor?: string): Promise<{ items: Message[]; nextCursor: string | null }>;
   searchMessages(conversationId: string, query: string): Promise<Message[]>;
   markConversationAsRead(conversationId: string): Promise<void>;
   sendMessage(conversationId: string, text: string): Promise<{ ok: boolean; message: Message }>;

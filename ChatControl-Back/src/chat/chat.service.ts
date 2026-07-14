@@ -287,10 +287,17 @@ export class ChatService {
     return { messages, nextCursor };
   }
 
-  async getGallery(conversationId: string, organizationId: string, userId?: string, userRole?: string): Promise<Message[]> {
+  async getGallery(
+    conversationId: string,
+    organizationId: string,
+    userId?: string,
+    userRole?: string,
+    cursor?: string,
+  ): Promise<{ items: Message[]; nextCursor: string | null }> {
     await this.assertConversationAccess(conversationId, organizationId, userId, userRole);
+    const take = 30;
     const rows = await this.prisma.message.findMany({
-      where: { 
+      where: {
         conversationId,
         OR: [
           { type: { in: [MessageType.IMAGE, MessageType.VIDEO, MessageType.AUDIO, MessageType.DOCUMENT] } },
@@ -298,20 +305,31 @@ export class ChatService {
           { body: { contains: 'https://', mode: 'insensitive' } }
         ]
       },
+      take: take + 1,
+      cursor: cursor ? { id: cursor } : undefined,
       orderBy: { whatsappTimestamp: 'desc' },
     });
-    return rows.map((m) => ({
-      id: m.id,
-      conversationId: m.conversationId,
-      fromUser: m.direction === MessageDirection.IN,
-      text: m.body,
-      timestamp: m.whatsappTimestamp.getTime(),
-      fromAi: m.fromAi ?? undefined,
-      type: m.type,
-      mediaUrl: m.mediaUrl,
-      mimeType: m.mimeType,
-      fileName: m.fileName,
-    }));
+
+    let nextCursor: string | null = null;
+    if (rows.length > take) {
+      nextCursor = rows.pop()!.id;
+    }
+
+    return {
+      items: rows.map((m) => ({
+        id: m.id,
+        conversationId: m.conversationId,
+        fromUser: m.direction === MessageDirection.IN,
+        text: m.body,
+        timestamp: m.whatsappTimestamp.getTime(),
+        fromAi: m.fromAi ?? undefined,
+        type: m.type,
+        mediaUrl: m.mediaUrl,
+        mimeType: m.mimeType,
+        fileName: m.fileName,
+      })),
+      nextCursor,
+    };
   }
 
   async searchMessages(conversationId: string, organizationId: string, query: string, userId?: string, userRole?: string): Promise<Message[]> {
