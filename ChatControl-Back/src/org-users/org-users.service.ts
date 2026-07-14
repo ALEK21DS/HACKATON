@@ -18,9 +18,14 @@ export class OrgUsersService {
     private readonly integrations: IntegrationsService,
   ) {}
 
-  async list(organizationId: string) {
+  async list(organizationId: string, assignableOnly = false) {
+    const where: any = { organizationId };
+    if (assignableOnly) {
+      where.role = UserRole.AGENT;
+      where.isActive = true;
+    }
     return this.prisma.user.findMany({
-      where: { organizationId },
+      where,
       select: {
         id: true,
         email: true,

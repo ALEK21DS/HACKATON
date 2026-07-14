@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -32,8 +32,8 @@ export class OrgUsersController {
   constructor(private readonly orgUsers: OrgUsersService) {}
 
   @Get()
-  list(@CurrentUser() user: AuthUser) {
-    return this.orgUsers.list(user.organizationId!);
+  list(@CurrentUser() user: AuthUser, @Query('assignable') assignable?: string) {
+    return this.orgUsers.list(user.organizationId!, assignable === 'true');
   }
 
   @Post()

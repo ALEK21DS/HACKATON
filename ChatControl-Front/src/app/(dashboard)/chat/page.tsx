@@ -184,7 +184,7 @@ export default function ChatPage() {
         setIsSandbox(m.isSandbox);
       }
       if (m.role === 'ORG_ADMIN') {
-        getOrgUsers().then(u => setOrgUsers(u)).catch(() => {});
+        getOrgUsers({ assignable: true }).then(u => setOrgUsers(u)).catch(() => {});
       }
     }).catch(() => {});
     loadConversations();
