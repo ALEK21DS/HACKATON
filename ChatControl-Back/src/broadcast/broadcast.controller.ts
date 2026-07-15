@@ -22,12 +22,13 @@ export class BroadcastController {
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
     @Query('q') q?: string,
+    @Query('campaignIds') campaignIds?: string,
   ) {
     return this.broadcast.getContacts(
       user.organizationId!,
       user.userId,
       user.role,
-      { q },
+      { q, campaignIds: campaignIds ? campaignIds.split(',').filter(Boolean) : undefined },
       cursor,
       limit ? parseInt(limit, 10) : undefined,
     );
@@ -38,12 +39,25 @@ export class BroadcastController {
     @CurrentUser() user: AuthUser,
     @Query('q') q?: string,
     @Query('onlyCanSend') onlyCanSend?: string,
+    @Query('campaignIds') campaignIds?: string,
   ) {
     const ids = await this.broadcast.getAllContactIds(user.organizationId!, user.userId, user.role, {
       q,
       onlyCanSend: onlyCanSend === 'true',
+      campaignIds: campaignIds ? campaignIds.split(',').filter(Boolean) : undefined,
     });
     return { ids };
+  }
+
+  @Post('campaign-contacts')
+  async getCampaignContacts(@CurrentUser() user: AuthUser, @Body() body: { campaignIds: string[] }) {
+    const byCampaign = await this.broadcast.getCampaignConversationMap(
+      user.organizationId!,
+      body.campaignIds ?? [],
+      user.userId,
+      user.role,
+    );
+    return { ok: true, byCampaign };
   }
 
   @Get('templates')

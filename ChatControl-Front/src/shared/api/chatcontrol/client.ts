@@ -250,6 +250,7 @@ export async function generateReply(
 // Broadcast (Mensajes Masivos)
 export interface BroadcastContact {
   id: string;
+  contactId: string;
   phone: string;
   name?: string;
   canSend: boolean;
@@ -274,22 +275,33 @@ export interface BroadcastContactsPage {
   total: number;
 }
 
-export async function getBroadcastContacts(params?: { cursor?: string; limit?: number; q?: string }): Promise<BroadcastContactsPage> {
+export async function getBroadcastContacts(params?: { cursor?: string; limit?: number; q?: string; campaignIds?: string[] }): Promise<BroadcastContactsPage> {
   const qs = new URLSearchParams();
   if (params?.cursor) qs.set('cursor', params.cursor);
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.q?.trim()) qs.set('q', params.q.trim());
+  if (params?.campaignIds?.length) qs.set('campaignIds', params.campaignIds.join(','));
   const query = qs.toString();
   return api<BroadcastContactsPage>(`/broadcast/contacts${query ? `?${query}` : ''}`);
 }
 
-export async function getBroadcastContactIds(params?: { q?: string; onlyCanSend?: boolean }): Promise<string[]> {
+export async function getBroadcastContactIds(params?: { q?: string; onlyCanSend?: boolean; campaignIds?: string[] }): Promise<string[]> {
   const qs = new URLSearchParams();
   if (params?.q?.trim()) qs.set('q', params.q.trim());
   if (params?.onlyCanSend) qs.set('onlyCanSend', 'true');
+  if (params?.campaignIds?.length) qs.set('campaignIds', params.campaignIds.join(','));
   const query = qs.toString();
   const res = await api<{ ids: string[] }>(`/broadcast/contacts/ids${query ? `?${query}` : ''}`);
   return res.ids;
+}
+
+export async function getBroadcastCampaignContactMap(
+  campaignIds: string[],
+): Promise<{ ok: boolean; byCampaign: Record<string, string[]> }> {
+  return api('/broadcast/campaign-contacts', {
+    method: 'POST',
+    body: JSON.stringify({ campaignIds }),
+  });
 }
 
 export async function getBroadcastTemplates(): Promise<BroadcastTemplate[]> {
