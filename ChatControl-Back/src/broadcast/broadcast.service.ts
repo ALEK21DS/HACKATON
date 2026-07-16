@@ -13,6 +13,7 @@ export type BroadcastMessageType = 'manual' | 'template' | 'ia';
 
 export interface BroadcastContact {
   id: string;
+  contactId: string;
   phone: string;
   name?: string;
   canSend: boolean;
@@ -61,12 +62,23 @@ export class BroadcastService {
     return c.phone.includes(q.trim()) || (c.name?.toLowerCase().includes(needle) ?? false);
   }
 
+  /** ids de Contact que pertenecen a alguna de las campañas dadas. */
+  private async getCampaignContactIdSet(organizationId: string, campaignIds?: string[]): Promise<Set<string> | null> {
+    if (!campaignIds?.length) return null;
+    const contacts = await this.prisma.contact.findMany({
+      where: { organizationId, campaignId: { in: campaignIds } },
+      select: { id: true },
+    });
+    return new Set(contacts.map((c) => c.id));
+  }
+
   /** Lista completa (sin paginar) de contactos de broadcast. Uso interno para envíos y validaciones. */
   async getAllContacts(organizationId: string, userId?: string, userRole?: string): Promise<BroadcastContact[]> {
     await this.ensureConversationsExist(organizationId);
     const list = await this.chat.getConversationsWithWindowStatus(organizationId, userId, userRole);
     return list.map((c) => ({
       id: c.id,
+      contactId: c.contactId!,
       phone: c.phone,
       name: c.name,
       canSend: c.canSend,
@@ -81,12 +93,17 @@ export class BroadcastService {
     organizationId: string,
     userId?: string,
     userRole?: string,
-    filter?: { q?: string },
+    filter?: { q?: string; campaignIds?: string[] },
     cursor?: string,
     limit?: number,
   ): Promise<{ contacts: BroadcastContact[]; nextCursor: string | null; total: number }> {
-    const list = await this.getAllContacts(organizationId, userId, userRole);
-    const matching = list.filter((c) => this.matchesQuery(c, filter?.q));
+    const [list, campaignContactIds] = await Promise.all([
+      this.getAllContacts(organizationId, userId, userRole),
+      this.getCampaignContactIdSet(organizationId, filter?.campaignIds),
+    ]);
+    const matching = list
+      .filter((c) => this.matchesQuery(c, filter?.q))
+      .filter((c) => !campaignContactIds || campaignContactIds.has(c.contactId));
 
     const take = limit && limit > 0 ? Math.min(limit, 200) : 50;
     let startIndex = 0;
@@ -104,13 +121,42 @@ export class BroadcastService {
     organizationId: string,
     userId?: string,
     userRole?: string,
-    filter?: { q?: string; onlyCanSend?: boolean },
+    filter?: { q?: string; onlyCanSend?: boolean; campaignIds?: string[] },
   ): Promise<string[]> {
-    const list = await this.getAllContacts(organizationId, userId, userRole);
+    const [list, campaignContactIds] = await Promise.all([
+      this.getAllContacts(organizationId, userId, userRole),
+      this.getCampaignContactIdSet(organizationId, filter?.campaignIds),
+    ]);
     return list
       .filter((c) => this.matchesQuery(c, filter?.q))
       .filter((c) => !filter?.onlyCanSend || c.canSend)
+      .filter((c) => !campaignContactIds || campaignContactIds.has(c.contactId))
       .map((c) => c.id);
+  }
+
+  /** Para cada campaña dada, ids de conversación (broadcast) de sus contactos. */
+  async getCampaignConversationMap(
+    organizationId: string,
+    campaignIds: string[],
+    userId?: string,
+    userRole?: string,
+  ): Promise<Record<string, string[]>> {
+    if (!campaignIds.length) return {};
+    const [contacts, list] = await Promise.all([
+      this.prisma.contact.findMany({
+        where: { organizationId, campaignId: { in: campaignIds } },
+        select: { id: true, campaignId: true },
+      }),
+      this.getAllContacts(organizationId, userId, userRole),
+    ]);
+    const contactToCampaign = new Map(contacts.map((c) => [c.id, c.campaignId!]));
+    const byCampaign: Record<string, string[]> = {};
+    for (const conv of list) {
+      const campaignId = contactToCampaign.get(conv.contactId);
+      if (!campaignId) continue;
+      (byCampaign[campaignId] ??= []).push(conv.id);
+    }
+    return byCampaign;
   }
 
   async getTemplates(organizationId: string): Promise<BroadcastTemplate[]> {

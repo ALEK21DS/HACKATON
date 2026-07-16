@@ -9,16 +9,19 @@ import {
   getMe,
   getBroadcastContacts,
   getBroadcastContactIds,
+  getBroadcastCampaignContactMap,
   getBroadcastTemplates,
   generateBroadcastMessage,
   sendBroadcast,
   getCrmBroadcastLists,
   previewBroadcastLists,
+  getCampaigns,
   type BroadcastListPreview,
   type BroadcastContact,
   type BroadcastTemplate,
   type BroadcastMessageType,
   type BroadcastListItem,
+  type Campaign,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
@@ -87,11 +90,30 @@ export default function BroadcastPage() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState('');
+  const [sendResultMessage, setSendResultMessage] = useState('');
+  const [broadcastProgress, setBroadcastProgress] = useState<{
+    total: number;
+    sentCount: number;
+    failedCount: number;
+  } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const socketRef = useRef<Socket | null>(null);
+
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
+  const [campaignContactMap, setCampaignContactMap] = useState<Record<string, string[]>>({});
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [campaignSearch, setCampaignSearch] = useState('');
+
+  const filteredCampaigns = campaigns.filter(c =>
+    !campaignSearch.trim() ||
+    c.name.toLowerCase().includes(campaignSearch.toLowerCase()) ||
+    (c.description?.toLowerCase().includes(campaignSearch.toLowerCase()) ?? false)
+  );
 
   const loadCrmLists = useCallback(async () => {
     try {
@@ -103,6 +125,25 @@ export default function BroadcastPage() {
   }, []);
 
   useEffect(() => { setMounted(true); }, []);
+
+  useEffect(() => {
+    if (!mounted || !isLoggedIn()) return;
+    const token = localStorage.getItem('chatcontrol_token');
+    const socket = io(WS_BASE, { auth: { token: token || '' } });
+    socketRef.current = socket;
+
+    socket.on('broadcast_started', (p: { total: number }) => {
+      setBroadcastProgress({ total: p.total, sentCount: 0, failedCount: 0 });
+    });
+    socket.on('broadcast_message_sent', () => {
+      setBroadcastProgress(prev => prev ? { ...prev, sentCount: prev.sentCount + 1 } : prev);
+    });
+    socket.on('broadcast_message_failed', () => {
+      setBroadcastProgress(prev => prev ? { ...prev, failedCount: prev.failedCount + 1 } : prev);
+    });
+
+    return () => { socket.disconnect(); };
+  }, [mounted]);
 
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
@@ -123,22 +164,31 @@ export default function BroadcastPage() {
     }
     (async () => {
       setLoading(true);
+      setLoadingCampaigns(true);
       try {
-        const tl = await getBroadcastTemplates();
+        const [tl, campaignsData] = await Promise.all([getBroadcastTemplates(), getCampaigns()]);
         setTemplates(tl);
+        setCampaigns(campaignsData);
         await loadCrmLists();
-      } catch (err) {} finally { setLoading(false); }
+
+        if (campaignsData.length > 0) {
+          const allIds = campaignsData.map(c => c.id);
+          const res = await getBroadcastCampaignContactMap(allIds);
+          setCampaignContactMap(res.byCampaign);
+        }
+      } catch (err) {} finally { setLoading(false); setLoadingCampaigns(false); }
     })();
   }, [mounted, router, searchParams, loadCrmLists]);
 
   const onlyCanSend = messageType !== 'template';
+  const campaignIdsKey = Array.from(selectedCampaignIds).sort().join(',');
 
-  async function loadFirstPage(q: string) {
+  async function loadFirstPage(q: string, campaignIds: string[]) {
     setLoading(true);
     try {
       const [page, ids] = await Promise.all([
-        getBroadcastContacts({ q, limit: PAGE_SIZE }),
-        getBroadcastContactIds({ q, onlyCanSend }),
+        getBroadcastContacts({ q, campaignIds, limit: PAGE_SIZE }),
+        getBroadcastContactIds({ q, campaignIds, onlyCanSend }),
       ]);
       setContacts(page.contacts);
       setNextCursor(page.nextCursor);
@@ -151,7 +201,7 @@ export default function BroadcastPage() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const page = await getBroadcastContacts({ q: debouncedQuery, limit: PAGE_SIZE, cursor: nextCursor });
+      const page = await getBroadcastContacts({ q: debouncedQuery, campaignIds: Array.from(selectedCampaignIds), limit: PAGE_SIZE, cursor: nextCursor });
       setContacts(prev => [...prev, ...page.contacts]);
       setNextCursor(page.nextCursor);
       setTotal(page.total);
@@ -160,8 +210,9 @@ export default function BroadcastPage() {
 
   useEffect(() => {
     if (!mounted || !isLoggedIn() || contactSource !== 'manual') return;
-    loadFirstPage(debouncedQuery);
-  }, [mounted, debouncedQuery, contactSource, onlyCanSend]);
+    loadFirstPage(debouncedQuery, Array.from(selectedCampaignIds));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, debouncedQuery, contactSource, onlyCanSend, campaignIdsKey]);
 
   function handleContactListScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
@@ -258,17 +309,33 @@ export default function BroadcastPage() {
   const handleSend = async () => {
     if (sending) return;
     setSending(true);
+    setSendError('');
+    setSendResultMessage('');
     try {
-      await sendBroadcast({
+      const result = await sendBroadcast({
         conversationIds: Array.from(selectedIds),
         type: messageType,
         text: messageType !== 'template' ? (generatedText || text) : undefined,
         templateId: messageType === 'template' ? templateId : undefined,
         templateVariables: messageType === 'template' ? templateVars : undefined,
       });
-      setSelectedIds(new Set());
-      setText(''); setInstruction(''); setGeneratedText('');
-    } catch (err) {} finally { setSending(false); }
+      if (result.sent === 0 && result.failed > 0) {
+        setSendError(`No se envió ningún mensaje (${result.failed} fallidos). ${result.errors[0]?.error ?? ''}`);
+      } else {
+        if (result.failed > 0) {
+          setSendError(`${result.sent} enviados, ${result.failed} fallidos. ${result.errors[0]?.error ?? ''}`);
+        } else {
+          setSendResultMessage(`${result.sent} mensaje${result.sent === 1 ? '' : 's'} enviado${result.sent === 1 ? '' : 's'} correctamente.`);
+        }
+        setSelectedIds(new Set());
+        setText(''); setInstruction(''); setGeneratedText('');
+      }
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Error al enviar el masivo.');
+    } finally {
+      setSending(false);
+      setTimeout(() => setBroadcastProgress(null), 4000);
+    }
   };
 
   const toggleListSelection = (listId: string) => {
@@ -278,6 +345,24 @@ export default function BroadcastPage() {
       else next.add(listId);
       return next;
     });
+  };
+
+  const toggleCampaign = (campaignId: string) => {
+    const nextCampaigns = new Set(selectedCampaignIds);
+    const nextContacts = new Set(selectedIds);
+
+    if (nextCampaigns.has(campaignId)) {
+      nextCampaigns.delete(campaignId);
+      const toRemove = campaignContactMap[campaignId] || [];
+      for (const cid of toRemove) nextContacts.delete(cid);
+    } else {
+      nextCampaigns.add(campaignId);
+      const ids = campaignContactMap[campaignId] || [];
+      for (const cid of ids) nextContacts.add(cid);
+    }
+
+    setSelectedCampaignIds(nextCampaigns);
+    setSelectedIds(nextContacts);
   };
 
   const handleSourceChange = (source: 'manual' | 'segments' | 'crm_lists') => {
@@ -302,6 +387,79 @@ export default function BroadcastPage() {
       
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+
+      {/* Card flotante de progreso de envío masivo */}
+      {broadcastProgress && (
+        <div style={{
+          position: 'fixed',
+          top: '1.5rem',
+          right: '1.5rem',
+          zIndex: 9999,
+          background: '#0d0d0d',
+          border: '1px solid rgba(239,68,68,0.25)',
+          borderRadius: '16px',
+          padding: '1rem 1.25rem',
+          minWidth: '220px',
+          boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+          animation: 'fadeIn 0.2s ease-out',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 800, color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Enviando Masivo
+            </span>
+            {sending && <Spinner size={14} />}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.3rem', marginBottom: '0.5rem' }}>
+            <span style={{ fontSize: '1.3rem', fontWeight: 900, color: 'white' }}>
+              {String(broadcastProgress.sentCount + broadcastProgress.failedCount).padStart(2, '0')}
+            </span>
+            <span style={{ fontSize: '0.9rem', color: '#666', fontWeight: 700 }}>/ {broadcastProgress.total}</span>
+          </div>
+          <div style={{ width: '100%', height: '6px', borderRadius: '3px', background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+            <div style={{
+              width: `${broadcastProgress.total > 0 ? ((broadcastProgress.sentCount + broadcastProgress.failedCount) / broadcastProgress.total) * 100 : 0}%`,
+              height: '100%',
+              background: broadcastProgress.failedCount > 0 ? 'linear-gradient(90deg, #EF4444, #F59E0B)' : '#EF4444',
+              transition: 'width 0.2s ease',
+            }} />
+          </div>
+          {broadcastProgress.failedCount > 0 && (
+            <p style={{ margin: '0.5rem 0 0', fontSize: '0.68rem', color: '#F59E0B', fontWeight: 700 }}>
+              {broadcastProgress.failedCount} fallido{broadcastProgress.failedCount === 1 ? '' : 's'}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Toast de resultado del envío */}
+      {(sendError || sendResultMessage) && (
+        <div style={{
+          position: 'fixed',
+          top: broadcastProgress ? '9.5rem' : '1.5rem',
+          right: '1.5rem',
+          zIndex: 9999,
+          maxWidth: '320px',
+          background: sendError ? 'rgba(239,68,68,0.12)' : 'rgba(34,197,94,0.12)',
+          border: `1px solid ${sendError ? 'rgba(239,68,68,0.35)' : 'rgba(34,197,94,0.35)'}`,
+          borderRadius: '14px',
+          padding: '0.9rem 1.1rem',
+          color: sendError ? '#EF4444' : '#4ADE80',
+          fontSize: '0.8rem',
+          fontWeight: 600,
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '0.6rem',
+          animation: 'fadeIn 0.2s ease-out',
+        }}>
+          <span style={{ flex: 1 }}>{sendError || sendResultMessage}</span>
+          <button
+            onClick={() => { setSendError(''); setSendResultMessage(''); }}
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '0.9rem', opacity: 0.7, flexShrink: 0 }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* ── Sidebar: Audiencia ── */}
       <aside className={`aside-sidebar${sidebarOpen ? ' open' : ''}`}>
@@ -405,12 +563,60 @@ export default function BroadcastPage() {
               )}
             </div>
           ) : contactSource === 'manual' ? (
-            <button
-              onClick={toggleAll}
-              style={{ width: '100%', padding: '0.6rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', color: '#8C8C8C', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '0.75rem' }}
-            >
-              {allMatchingSelected ? `Desmarcar todos (${total})` : `Seleccionar todos (${total})`}
-            </button>
+            <>
+              <button
+                onClick={toggleAll}
+                style={{ width: '100%', padding: '0.6rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', color: '#8C8C8C', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', cursor: 'pointer', transition: 'all 0.2s', marginBottom: '0.75rem' }}
+              >
+                {allMatchingSelected ? `Desmarcar todos (${total})` : `Seleccionar todos (${total})`}
+              </button>
+
+              {!loadingCampaigns && campaigns.length > 0 && (
+                <div style={{ padding: '0.65rem 0.75rem', borderRadius: '10px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <p style={{ margin: '0 0 0.5rem', fontSize: '0.65rem', fontWeight: 800, color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    Filtrar por campaña
+                  </p>
+
+                  <div style={{ position: 'relative', marginBottom: '0.5rem' }}>
+                    <SearchIcon style={{ position: 'absolute', left: '0.5rem', top: '50%', transform: 'translateY(-50%)', color: '#444', width: '0.75rem', height: '0.75rem' }} />
+                    <input
+                      type="text"
+                      placeholder="Buscar campaña..."
+                      value={campaignSearch}
+                      onChange={(e) => setCampaignSearch(e.target.value)}
+                      style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '0.4rem 0.5rem 0.4rem 1.6rem', color: 'white', outline: 'none', fontSize: '0.72rem', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                    {filteredCampaigns.length === 0 ? (
+                      <p style={{ fontSize: '0.7rem', color: '#555', padding: '0.5rem 0', textAlign: 'center' }}>
+                        {campaignSearch ? 'Sin resultados' : 'Sin campañas'}
+                      </p>
+                    ) : filteredCampaigns.map(c => {
+                      const isCampaignSelected = selectedCampaignIds.has(c.id);
+                      const contactCount = campaignContactMap[c.id]?.length || 0;
+                      return (
+                        <div
+                          key={c.id}
+                          onClick={() => toggleCampaign(c.id)}
+                          style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.25rem', borderRadius: '6px', cursor: 'pointer', userSelect: 'none', opacity: c.isActive ? 1 : 0.55 }}
+                        >
+                          <div style={{ width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0, border: `2px solid ${isCampaignSelected ? '#EF4444' : 'rgba(255,255,255,0.15)'}`, background: isCampaignSelected ? '#EF4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease' }}>
+                            {isCampaignSelected && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5 4.5-5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                          </div>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: isCampaignSelected ? '#FFF' : '#AAA', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {c.name}
+                          </span>
+                          <span style={{ fontSize: '0.6rem', color: '#555' }}>{contactCount}</span>
+                          {c.isActive && <span style={{ fontSize: '0.6rem', fontWeight: 800, color: '#4ADE80', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Activa</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <div style={{ padding: '0.75rem', marginBottom: '0.75rem', borderRadius: 10, background: 'rgba(239,68,68,0.06)', color: '#EF4444', fontSize: '0.75rem', fontWeight: 700 }}>
               {selectedIds.size} contactos del segmento (todos los contactos de la organización)
@@ -667,6 +873,11 @@ export default function BroadcastPage() {
           0% { transform: scale(0.9); opacity: 0.4; }
           50% { transform: scale(1.1); opacity: 1; }
           100% { transform: scale(0.9); opacity: 0.4; }
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-6px); }
+          to { opacity: 1; transform: translateY(0); }
         }
 
         .mob-sidebar-btn {
