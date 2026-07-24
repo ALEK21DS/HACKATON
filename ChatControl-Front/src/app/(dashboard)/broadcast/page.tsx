@@ -17,7 +17,6 @@ import {
   previewBroadcastLists,
   getCampaigns,
   importExcelContacts,
-  getBroadcastListContactIds,
   type BroadcastListPreview,
   type BroadcastContact,
   type BroadcastTemplate,
@@ -449,8 +448,7 @@ export default function BroadcastPage() {
     try {
       const result = await importExcelContacts(excelPreviewRows);
       setExcelImportResult(result);
-      const { conversationIds } = await getBroadcastListContactIds(result.listId);
-      setSelectedIds(new Set(conversationIds));
+      setSelectedIds(new Set(result.conversationIds));
     } catch (err) {
       setExcelError(err instanceof Error ? err.message : 'Error al importar el archivo.');
     } finally {
@@ -458,7 +456,7 @@ export default function BroadcastPage() {
     }
   };
 
-  const forceMetaTemplate = contactSource === 'excel_import' && (excelImportResult?.newContactIds.length ?? 0) > 0;
+  const forceMetaTemplate = contactSource === 'excel_import' && (excelImportResult?.outOfWindowCount ?? 0) > 0;
 
   useEffect(() => {
     if (forceMetaTemplate && messageType !== 'template') {
@@ -737,10 +735,11 @@ export default function BroadcastPage() {
                   <span>Creados: <strong style={{ color: '#22c55e' }}>{excelImportResult.created}</strong></span>
                   <span>Actualizados: <strong style={{ color: '#3b82f6' }}>{excelImportResult.updated}</strong></span>
                   <span>Rechazados: <strong style={{ color: '#ef4444' }}>{excelImportResult.rejected}</strong></span>
-                  <span>Listos: <strong style={{ color: '#F2F2F2' }}>{selectedIds.size}</strong></span>
-                  {excelImportResult.newContactIds.length > 0 && (
+                  <span>Fuera de ventana: <strong style={{ color: '#f59e0b' }}>{excelImportResult.outOfWindowCount}</strong></span>
+                  <span style={{ gridColumn: '1 / -1' }}>Listos: <strong style={{ color: '#F2F2F2' }}>{selectedIds.size}</strong></span>
+                  {excelImportResult.outOfWindowCount > 0 && (
                     <span style={{ gridColumn: '1 / -1', color: '#F59E0B', fontWeight: 700 }}>
-                      {excelImportResult.newContactIds.length} son contactos nuevos: se exige plantilla aprobada de Meta para el envío.
+                      {excelImportResult.outOfWindowCount} contacto{excelImportResult.outOfWindowCount === 1 ? '' : 's'} ({excelImportResult.newContactIds.length} nuevo{excelImportResult.newContactIds.length === 1 ? '' : 's'}) {excelImportResult.outOfWindowCount === 1 ? 'está' : 'están'} fuera de la ventana de 24h: se exige plantilla aprobada de Meta para el envío.
                     </span>
                   )}
                 </div>
@@ -945,7 +944,7 @@ export default function BroadcastPage() {
 
           {forceMetaTemplate && (
             <p style={{ marginBottom: '1.75rem', fontSize: '0.75rem', color: '#F59E0B', fontWeight: 700 }}>
-              El Excel importado incluye contactos nuevos: WhatsApp exige una plantilla aprobada de Meta para iniciarles conversación, por eso solo esa opción está disponible para este envío.
+              El Excel importado incluye contactos nuevos y/o fuera de la ventana de 24h: WhatsApp exige una plantilla aprobada de Meta para escribirles, por eso solo esa opción está disponible para este envío.
             </p>
           )}
 
