@@ -35,6 +35,8 @@ export interface ImportExcelContactsResultDto {
   rejected: number;
   errors: Array<{ phone?: string; error: string }>;
   newContactIds: string[];
+  conversationIds: string[];
+  outOfWindowCount: number;
 }
 
 @Injectable()
@@ -307,15 +309,28 @@ export class BroadcastListsService {
     const contactIds = prepared.map((p) => contactByPhone.get(p.phone)!);
     const existingConversations = await this.prisma.conversation.findMany({
       where: { contactId: { in: contactIds } },
-      select: { contactId: true },
+      select: { id: true, contactId: true },
     });
-    const contactsWithConversation = new Set(existingConversations.map((c) => c.contactId));
+    const conversationByContact = new Map(existingConversations.map((c) => [c.contactId, c.id]));
     const conversationsToCreate = contactIds
-      .filter((id) => !contactsWithConversation.has(id))
+      .filter((id) => !conversationByContact.has(id))
       .map((id) => ({ contactId: id }));
     if (conversationsToCreate.length) {
       await this.prisma.conversation.createMany({ data: conversationsToCreate });
+      const created = await this.prisma.conversation.findMany({
+        where: { contactId: { in: conversationsToCreate.map((c) => c.contactId) } },
+        select: { id: true, contactId: true },
+      });
+      for (const c of created) conversationByContact.set(c.contactId, c.id);
     }
+    // Solo los contactos de este archivo, no todo el historial de la lista (que puede acumular importaciones previas).
+    const conversationIds = contactIds.map((id) => conversationByContact.get(id)!);
+
+    // Sin userRole: necesitamos el estado de ventana de TODAS las conversaciones de la org,
+    // no solo las asignadas al usuario actual (las recién creadas no tienen asignación todavía).
+    const windowStatuses = await this.chat.getConversationsWithWindowStatus(organizationId);
+    const canSendByConversation = new Map(windowStatuses.map((c) => [c.id, c.canSend]));
+    const outOfWindowCount = conversationIds.filter((id) => !(canSendByConversation.get(id) ?? false)).length;
 
     for (let i = 0; i < prepared.length; i += UPSERT_BATCH_SIZE) {
       const chunk = prepared.slice(i, i + UPSERT_BATCH_SIZE);
@@ -338,6 +353,6 @@ export class BroadcastListsService {
     const updated = prepared.length - created;
     const newContactIds = newContactPhones.map((p) => contactByPhone.get(p)!);
 
-    return { listId: list.id, created, updated, rejected, errors, newContactIds };
+    return { listId: list.id, created, updated, rejected, errors, newContactIds, conversationIds, outOfWindowCount };
   }
 }

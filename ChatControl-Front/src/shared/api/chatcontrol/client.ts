@@ -821,6 +821,8 @@ export interface ImportExcelContactsResult {
   rejected: number;
   errors: Array<{ phone?: string; error: string }>;
   newContactIds: string[];
+  conversationIds: string[];
+  outOfWindowCount: number;
 }
 
 export async function importExcelContacts(
