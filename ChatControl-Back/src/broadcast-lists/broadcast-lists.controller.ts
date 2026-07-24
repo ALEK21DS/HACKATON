@@ -7,6 +7,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { OrgMemberGuard } from '../auth/org-member.guard';
 import type { AuthUser } from '../auth/auth.types';
 import { BroadcastListsService } from './broadcast-lists.service';
+import { ImportExcelContactsDto } from './dto/import-excel-contacts.dto';
 
 @Controller('broadcast-lists')
 @UseGuards(JwtAuthGuard, OrgMemberGuard, RolesGuard)
@@ -35,6 +36,11 @@ export class BroadcastListsController {
       user.userId,
       user.role,
     );
+  }
+
+  @Post('import-excel')
+  async importExcel(@CurrentUser() user: AuthUser, @Body() dto: ImportExcelContactsDto) {
+    return this.service.importExcelContacts(user.organizationId!, user.userId, dto.listName, dto.contacts);
   }
 
   @Get(':id')

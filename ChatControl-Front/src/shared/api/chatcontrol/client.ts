@@ -814,6 +814,25 @@ export async function previewBroadcastLists(listIds: string[]): Promise<Broadcas
   });
 }
 
+export interface ImportExcelContactsResult {
+  listId: string;
+  created: number;
+  updated: number;
+  rejected: number;
+  errors: Array<{ phone?: string; error: string }>;
+  newContactIds: string[];
+}
+
+export async function importExcelContacts(
+  contacts: Array<{ name?: string; phone: string }>,
+  listName?: string,
+): Promise<ImportExcelContactsResult> {
+  return api<ImportExcelContactsResult>('/broadcast-lists/import-excel', {
+    method: 'POST',
+    body: JSON.stringify({ contacts, listName }),
+  });
+}
+
 export async function getBroadcastListDetail(id: string): Promise<{
   list: BroadcastListItem;
   contacts: BroadcastListContact[];

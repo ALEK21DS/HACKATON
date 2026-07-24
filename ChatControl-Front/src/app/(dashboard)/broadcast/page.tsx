@@ -16,12 +16,15 @@ import {
   getCrmBroadcastLists,
   previewBroadcastLists,
   getCampaigns,
+  importExcelContacts,
+  getBroadcastListContactIds,
   type BroadcastListPreview,
   type BroadcastContact,
   type BroadcastTemplate,
   type BroadcastMessageType,
   type BroadcastListItem,
   type Campaign,
+  type ImportExcelContactsResult,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
@@ -80,8 +83,15 @@ export default function BroadcastPage() {
   const [broadcastLists, setBroadcastLists] = useState<BroadcastListItem[]>([]);
   const [selectedListIds, setSelectedListIds] = useState<Set<string>>(new Set());
   const [listPreview, setListPreview] = useState<BroadcastListPreview | null>(null);
-  const [contactSource, setContactSource] = useState<'manual' | 'segments' | 'crm_lists'>('manual');
+  const [contactSource, setContactSource] = useState<'manual' | 'segments' | 'crm_lists' | 'excel_import'>('manual');
   const [loadingList, setLoadingList] = useState(false);
+  const [excelPreviewRows, setExcelPreviewRows] = useState<Array<{ name: string; phone: string }>>([]);
+  const [excelFileName, setExcelFileName] = useState('');
+  const [excelParsing, setExcelParsing] = useState(false);
+  const [excelImporting, setExcelImporting] = useState(false);
+  const [excelImportResult, setExcelImportResult] = useState<ImportExcelContactsResult | null>(null);
+  const [excelError, setExcelError] = useState('');
+  const excelFileInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState('');
   const [templateId, setTemplateId] = useState('');
   const [templateVars, setTemplateVars] = useState<Record<string, string>>({});
@@ -365,10 +375,14 @@ export default function BroadcastPage() {
     setSelectedIds(nextContacts);
   };
 
-  const handleSourceChange = (source: 'manual' | 'segments' | 'crm_lists') => {
+  const handleSourceChange = (source: 'manual' | 'segments' | 'crm_lists' | 'excel_import') => {
     setContactSource(source);
     setSelectedListIds(new Set());
     setListPreview(null);
+    setExcelPreviewRows([]);
+    setExcelFileName('');
+    setExcelImportResult(null);
+    setExcelError('');
     if (source === 'segments') {
       setSelectedIds(new Set());
       setLoadingList(true);
@@ -378,7 +392,85 @@ export default function BroadcastPage() {
     }
   };
 
+  const handleDownloadExcelTemplate = async () => {
+    const XLSX = await import('xlsx');
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['nombre', 'numero'],
+      ['Juan Pérez', '3001234567'],
+      ['María Gómez', '3109876543'],
+    ]);
+    ws['!cols'] = [{ wch: 25 }, { wch: 18 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Contactos');
+    XLSX.writeFile(wb, 'plantilla_contactos_masivos.xlsx');
+  };
+
+  const handleExcelFileSelect = async (file: File) => {
+    setExcelError('');
+    setExcelImportResult(null);
+    setSelectedIds(new Set());
+    setExcelFileName(file.name);
+    setExcelParsing(true);
+    try {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rawRows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+      let dataRows = rawRows;
+      const firstRow = rawRows[0]?.map(v => String(v ?? '').trim().toLowerCase()) || [];
+      if (firstRow[0]?.includes('nombre') || firstRow[1]?.includes('numero') || firstRow[1]?.includes('número') || firstRow[1]?.includes('telefono')) {
+        dataRows = rawRows.slice(1);
+      }
+
+      const rows = dataRows
+        .map(r => ({ name: String(r[0] ?? '').trim(), phone: String(r[1] ?? '').trim() }))
+        .filter(r => r.phone);
+
+      if (!rows.length) {
+        setExcelError('No se encontraron filas con número de teléfono en el archivo.');
+        setExcelPreviewRows([]);
+      } else {
+        setExcelPreviewRows(rows);
+      }
+    } catch (err) {
+      setExcelError('No se pudo leer el archivo. Verifica que sea un .xlsx o .xls válido.');
+      setExcelPreviewRows([]);
+    } finally {
+      setExcelParsing(false);
+    }
+  };
+
+  const handleConfirmExcelImport = async () => {
+    if (!excelPreviewRows.length || excelImporting) return;
+    setExcelImporting(true);
+    setExcelError('');
+    try {
+      const result = await importExcelContacts(excelPreviewRows);
+      setExcelImportResult(result);
+      const { conversationIds } = await getBroadcastListContactIds(result.listId);
+      setSelectedIds(new Set(conversationIds));
+    } catch (err) {
+      setExcelError(err instanceof Error ? err.message : 'Error al importar el archivo.');
+    } finally {
+      setExcelImporting(false);
+    }
+  };
+
+  const forceMetaTemplate = contactSource === 'excel_import' && (excelImportResult?.newContactIds.length ?? 0) > 0;
+
+  useEffect(() => {
+    if (forceMetaTemplate && messageType !== 'template') {
+      setMessageType('template');
+    }
+    if (forceMetaTemplate && templateId && !templateId.startsWith('meta_')) {
+      setTemplateId('');
+    }
+  }, [forceMetaTemplate, messageType, templateId]);
+
   const selectedTemplate = templates.find(t => t.id === templateId);
+  const templateOptions = forceMetaTemplate ? templates.filter(t => t.id.startsWith('meta_')) : templates;
 
   if (!mounted) return null;
 
@@ -485,6 +577,7 @@ export default function BroadcastPage() {
               ['manual', 'Contactos Manuales'],
               ['segments', 'Segmentos'],
               ['crm_lists', 'Listas CRM'],
+              ['excel_import', 'Importar Excel'],
             ] as const).map(([source, label]) => (
               <button
                 key={source}
@@ -559,6 +652,97 @@ export default function BroadcastPage() {
                   <span>Duplicados: <strong style={{ color: '#f59e0b' }}>{listPreview.duplicates}</strong></span>
                   <span>Inválidos: <strong style={{ color: '#ef4444' }}>{listPreview.invalid}</strong></span>
                   <span style={{ gridColumn: '1 / -1' }}>Bloqueados: <strong style={{ color: '#ef4444' }}>{listPreview.blocked}</strong></span>
+                </div>
+              )}
+            </div>
+          ) : contactSource === 'excel_import' ? (
+            <div style={{ marginBottom: '0.75rem' }}>
+              <div style={{ fontSize: '0.65rem', color: '#666', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>
+                Excel con columnas &quot;nombre&quot; y &quot;numero&quot;
+              </div>
+              <button
+                type="button"
+                onClick={handleDownloadExcelTemplate}
+                style={{ width: '100%', padding: '0.6rem', marginBottom: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, color: '#8C8C8C', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Descargar plantilla
+              </button>
+              <input
+                ref={excelFileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleExcelFileSelect(file);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => excelFileInputRef.current?.click()}
+                disabled={excelParsing}
+                style={{ width: '100%', padding: '0.75rem', background: 'rgba(239,68,68,0.08)', border: '1px dashed rgba(239,68,68,0.3)', borderRadius: 10, color: '#EF4444', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', cursor: excelParsing ? 'default' : 'pointer' }}
+              >
+                {excelParsing ? <Spinner size={14} /> : (excelFileName || 'Seleccionar archivo .xlsx')}
+              </button>
+
+              {excelError && (
+                <p style={{ marginTop: 8, fontSize: '0.7rem', color: '#EF4444', fontWeight: 600 }}>{excelError}</p>
+              )}
+
+              {excelPreviewRows.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: '0.7rem', color: '#8C8C8C', marginBottom: 6 }}>
+                    {excelImportResult ? `${excelPreviewRows.length} contactos importados` : `${excelPreviewRows.length} filas detectadas`}
+                  </div>
+                  <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, marginBottom: excelImportResult ? 0 : 10 }}>
+                    {excelPreviewRows.map((r, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, fontSize: '0.72rem', color: '#AAA', padding: '0.3rem 0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name || '(sin nombre)'}</span>
+                        <span style={{ color: '#666' }}>{r.phone}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {!excelImportResult && (
+                    <button
+                      type="button"
+                      onClick={handleConfirmExcelImport}
+                      disabled={excelImporting}
+                      style={{ width: '100%', padding: '0.65rem', background: '#EF4444', border: 'none', borderRadius: 10, color: 'white', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', cursor: excelImporting ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                    >
+                      {excelImporting && <Spinner size={14} />}
+                      {excelImporting ? 'Importando...' : 'Confirmar importación'}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {excelImportResult && (
+                <div style={{
+                  marginTop: 10,
+                  padding: '0.75rem',
+                  borderRadius: 10,
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  fontSize: '0.7rem',
+                  color: '#8C8C8C',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: 6,
+                }}>
+                  <span>Creados: <strong style={{ color: '#22c55e' }}>{excelImportResult.created}</strong></span>
+                  <span>Actualizados: <strong style={{ color: '#3b82f6' }}>{excelImportResult.updated}</strong></span>
+                  <span>Rechazados: <strong style={{ color: '#ef4444' }}>{excelImportResult.rejected}</strong></span>
+                  <span>Listos: <strong style={{ color: '#F2F2F2' }}>{selectedIds.size}</strong></span>
+                  {excelImportResult.newContactIds.length > 0 && (
+                    <span style={{ gridColumn: '1 / -1', color: '#F59E0B', fontWeight: 700 }}>
+                      {excelImportResult.newContactIds.length} son contactos nuevos: se exige plantilla aprobada de Meta para el envío.
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -643,6 +827,10 @@ export default function BroadcastPage() {
           ) : contactSource === 'segments' ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: '#22c55e', fontSize: '0.9rem', fontWeight: 700 }}>
               Segmento completo: {selectedIds.size} contactos
+            </div>
+          ) : contactSource === 'excel_import' ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: excelImportResult ? '#22c55e' : '#555', fontSize: '0.9rem', fontWeight: 700 }}>
+              {excelImportResult ? `${selectedIds.size} contactos listos desde el Excel importado` : 'Selecciona un archivo Excel para comenzar'}
             </div>
           ) : (
             <>
@@ -732,24 +920,34 @@ export default function BroadcastPage() {
           </header>
 
           {/* Selector de Tipo de Mensaje */}
-          <div style={{ background: '#080808', borderRadius: '20px', padding: '0.5rem', display: 'flex', gap: '0.5rem', marginBottom: '2.5rem', border: '1px solid rgba(255,255,255,0.05)' }}>
-            {(['manual', 'template', 'ia'] as BroadcastMessageType[]).map((type) => (
-              <button
-                key={type}
-                onClick={() => setMessageType(type)}
-                style={{ 
-                  flex: 1, padding: '1rem', borderRadius: '16px', border: 'none',
-                  background: messageType === type ? '#EF4444' : 'transparent',
-                  color: messageType === type ? 'white' : '#666',
-                  fontSize: '0.85rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em',
-                  cursor: 'pointer', transition: 'all 0.3s ease',
-                  boxShadow: messageType === type ? '0 10px 20px rgba(239, 68, 68, 0.2)' : 'none'
-                }}
-              >
-                {type === 'manual' ? 'Texto Libre' : type === 'template' ? 'Plantilla Oficial' : 'Asistente IA'}
-              </button>
-            ))}
+          <div style={{ background: '#080808', borderRadius: '20px', padding: '0.5rem', display: 'flex', gap: '0.5rem', marginBottom: forceMetaTemplate ? '0.75rem' : '2.5rem', border: '1px solid rgba(255,255,255,0.05)' }}>
+            {(['manual', 'template', 'ia'] as BroadcastMessageType[])
+              .filter((type) => !forceMetaTemplate || type === 'template')
+              .map((type) => {
+              return (
+                <button
+                  key={type}
+                  onClick={() => setMessageType(type)}
+                  style={{
+                    flex: 1, padding: '1rem', borderRadius: '16px', border: 'none',
+                    background: messageType === type ? '#EF4444' : 'transparent',
+                    color: messageType === type ? 'white' : '#666',
+                    fontSize: '0.85rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em',
+                    cursor: 'pointer', transition: 'all 0.3s ease',
+                    boxShadow: messageType === type ? '0 10px 20px rgba(239, 68, 68, 0.2)' : 'none'
+                  }}
+                >
+                  {type === 'manual' ? 'Texto Libre' : type === 'template' ? 'Plantilla Oficial' : 'Asistente IA'}
+                </button>
+              );
+            })}
           </div>
+
+          {forceMetaTemplate && (
+            <p style={{ marginBottom: '1.75rem', fontSize: '0.75rem', color: '#F59E0B', fontWeight: 700 }}>
+              El Excel importado incluye contactos nuevos: WhatsApp exige una plantilla aprobada de Meta para iniciarles conversación, por eso solo esa opción está disponible para este envío.
+            </p>
+          )}
 
           {/* Área de Composición */}
           <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '24px', padding: '2rem' }}>
@@ -779,8 +977,13 @@ export default function BroadcastPage() {
                     }}
                   >
                     <option value="" style={{ background: '#0d0d0d' }}>Seleccionar...</option>
-                    {templates.map(t => <option key={t.id} value={t.id} style={{ background: '#0d0d0d' }}>{t.name}</option>)}
+                    {templateOptions.map(t => <option key={t.id} value={t.id} style={{ background: '#0d0d0d' }}>{t.name}</option>)}
                   </select>
+                  {forceMetaTemplate && templateOptions.length === 0 && (
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: '#EF4444', fontWeight: 600 }}>
+                      No hay plantillas aprobadas de Meta disponibles. Crea/aprueba una plantilla oficial antes de enviar a estos contactos nuevos.
+                    </p>
+                  )}
                 </div>
 
                 {selectedTemplate && (
