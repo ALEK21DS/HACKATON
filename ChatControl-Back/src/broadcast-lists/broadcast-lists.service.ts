@@ -28,6 +28,15 @@ export interface BroadcastListDetailDto extends BroadcastListDto {
   }>;
 }
 
+export interface ImportExcelContactsResultDto {
+  listId: string;
+  created: number;
+  updated: number;
+  rejected: number;
+  errors: Array<{ phone?: string; error: string }>;
+  newContactIds: string[];
+}
+
 @Injectable()
 export class BroadcastListsService {
   constructor(
@@ -43,12 +52,12 @@ export class BroadcastListsService {
   ): Promise<BroadcastListDto[]> {
     const where: {
       organizationId: string;
-      source?: string;
+      source?: { in: string[] };
       assignedToUserId?: string;
     } = { organizationId };
 
     if (crmOnly) {
-      where.source = 'crm';
+      where.source = { in: ['crm', 'excel'] };
     }
     if (userRole === UserRole.AGENT && userId) {
       where.assignedToUserId = userId;
@@ -168,12 +177,12 @@ export class BroadcastListsService {
       where: {
         id: { in: listIds },
         organizationId,
-        source: 'crm',
+        source: { in: ['crm', 'excel'] },
         ...(userRole === UserRole.AGENT && userId ? { assignedToUserId: userId } : {}),
       },
     });
     if (!lists.length) {
-      throw new NotFoundException('No se encontraron listas CRM válidas');
+      throw new NotFoundException('No se encontraron listas válidas');
     }
 
     const links = await this.prisma.broadcastListContact.findMany({
@@ -226,5 +235,109 @@ export class BroadcastListsService {
       blocked,
       conversationIds,
     };
+  }
+
+  async importExcelContacts(
+    organizationId: string,
+    userId: string | undefined,
+    listName: string | undefined,
+    rows: Array<{ name?: string; phone: string }>,
+  ): Promise<ImportExcelContactsResultDto> {
+    if (!rows?.length) {
+      throw new BadRequestException('No hay contactos para importar');
+    }
+
+    const UPSERT_BATCH_SIZE = 50;
+    const errors: Array<{ phone?: string; error: string }> = [];
+    let rejected = 0;
+
+    const prepared: Array<{ phone: string; name: string | null }> = [];
+    const seenPhones = new Set<string>();
+    for (const row of rows) {
+      const phone = (row.phone || '').replace(/\D/g, '');
+      if (!phone || phone.length < 7) {
+        rejected++;
+        errors.push({ phone: row.phone, error: 'Teléfono inválido' });
+        continue;
+      }
+      if (seenPhones.has(phone)) continue;
+      seenPhones.add(phone);
+      prepared.push({ phone, name: row.name?.trim() || null });
+    }
+
+    if (!prepared.length) {
+      throw new BadRequestException('Ningún contacto tiene un teléfono válido');
+    }
+
+    const name = listName?.trim() || `Excel ${new Date().toISOString().slice(0, 10)}`;
+    let list = await this.prisma.broadcastList.findUnique({
+      where: { organizationId_name: { organizationId, name } },
+    });
+    if (!list) {
+      list = await this.prisma.broadcastList.create({
+        data: { organizationId, name, source: 'excel', crmExportedAt: new Date(), createdBy: userId },
+      });
+    }
+
+    const phones = prepared.map((p) => p.phone);
+    const existingContacts = await this.prisma.contact.findMany({
+      where: { organizationId, phone: { in: phones } },
+      select: { id: true, phone: true },
+    });
+    const existingByPhone = new Set(existingContacts.map((c) => c.phone));
+    const newContactPhones = phones.filter((p) => !existingByPhone.has(p));
+
+    const contactByPhone = new Map<string, string>(existingContacts.map((c) => [c.phone, c.id]));
+    for (let i = 0; i < prepared.length; i += UPSERT_BATCH_SIZE) {
+      const chunk = prepared.slice(i, i + UPSERT_BATCH_SIZE);
+      const upserted = await this.prisma.$transaction(
+        chunk.map((item) =>
+          this.prisma.contact.upsert({
+            where: { organizationId_phone: { organizationId, phone: item.phone } },
+            create: { organizationId, phone: item.phone, name: item.name },
+            // Si la fila no trae nombre, no se pisa el nombre ya guardado del contacto existente.
+            update: item.name ? { name: item.name } : {},
+            select: { id: true, phone: true },
+          }),
+        ),
+      );
+      for (const c of upserted) contactByPhone.set(c.phone, c.id);
+    }
+
+    const contactIds = prepared.map((p) => contactByPhone.get(p.phone)!);
+    const existingConversations = await this.prisma.conversation.findMany({
+      where: { contactId: { in: contactIds } },
+      select: { contactId: true },
+    });
+    const contactsWithConversation = new Set(existingConversations.map((c) => c.contactId));
+    const conversationsToCreate = contactIds
+      .filter((id) => !contactsWithConversation.has(id))
+      .map((id) => ({ contactId: id }));
+    if (conversationsToCreate.length) {
+      await this.prisma.conversation.createMany({ data: conversationsToCreate });
+    }
+
+    for (let i = 0; i < prepared.length; i += UPSERT_BATCH_SIZE) {
+      const chunk = prepared.slice(i, i + UPSERT_BATCH_SIZE);
+      await this.prisma.$transaction(
+        chunk.map((item) => {
+          const contactId = contactByPhone.get(item.phone)!;
+          return this.prisma.broadcastListContact.upsert({
+            where: { listId_contactId: { listId: list.id, contactId } },
+            create: { listId: list.id, contactId, source: 'excel' },
+            update: {},
+          });
+        }),
+      );
+    }
+
+    const count = await this.prisma.broadcastListContact.count({ where: { listId: list.id } });
+    await this.prisma.broadcastList.update({ where: { id: list.id }, data: { contactCount: count } });
+
+    const created = newContactPhones.length;
+    const updated = prepared.length - created;
+    const newContactIds = newContactPhones.map((p) => contactByPhone.get(p)!);
+
+    return { listId: list.id, created, updated, rejected, errors, newContactIds };
   }
 }
