@@ -24,4 +24,17 @@ export class SendBroadcastDto {
   @IsObject()
   @IsOptional()
   templateVariables?: Record<string, string>;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  templateAutoNameVariables?: string[];
+
+  @IsString()
+  @IsOptional()
+  templateHeaderValue?: string;
+
+  @IsObject()
+  @IsOptional()
+  templateButtonVariables?: Record<string, string>;
 }

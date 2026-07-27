@@ -265,14 +265,19 @@ model Message {
   sentByUserId      String?
   isEdited          Boolean          @default(false)
   editedAt          DateTime?
+  replyToId         String?
+  replyToWamid      String?
   conversation      Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sentByUser        User?            @relation("MessageSentBy", fields: [sentByUserId], references: [id])
   editHistory       MessageEditHistory[]
+  replyTo           Message?         @relation("MessageReplyTo", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies           Message[]        @relation("MessageReplyTo")
 
   @@index([conversationId])
   @@index([conversationId, whatsappTimestamp])
   @@index([whatsappMessageId])
   @@index([sentByUserId])
+  @@index([replyToId])
 }
 
 model MessageEditHistory {

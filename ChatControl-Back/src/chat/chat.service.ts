@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MessageDirection, MessageStatus, MessageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -24,6 +24,15 @@ export interface Message {
   mimeType?: string | null;
   fileName?: string | null;
   status?: string;
+  replyTo?: {
+    id: string;
+    text: string;
+    fromUser: boolean;
+    type?: string;
+    mediaUrl?: string | null;
+  } | null;
+  /** true si el mensaje es una respuesta/cita a otro, aunque no podamos resolver su contenido (ej. citó un mensaje que no pasó por nuestro sistema). */
+  isReply?: boolean;
 }
 
 export interface Conversation {
@@ -43,6 +52,8 @@ export interface Conversation {
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly whatsapp: WhatsAppService,
@@ -67,6 +78,7 @@ export class ChatService {
     mimeType?: string;
     fileName?: string;
     contactName?: string;
+    replyToWamid?: string;
   }): Promise<void> {
     const phone = normalizePhone(payload.from);
 
@@ -172,7 +184,28 @@ export class ChatService {
         );
       }
     } else {
-      await this.prisma.message.create({
+      let replyToId: string | undefined;
+      let replyToSnapshot: Message['replyTo'];
+      if (payload.replyToWamid) {
+        const quoted = await this.prisma.message.findUnique({
+          where: { whatsappMessageId: payload.replyToWamid },
+        });
+        this.logger.log(
+          `registerIncomingMessage: replyToWamid=${payload.replyToWamid} quotedFound=${!!quoted}`,
+        );
+        if (quoted) {
+          replyToId = quoted.id;
+          replyToSnapshot = {
+            id: quoted.id,
+            text: quoted.body,
+            fromUser: quoted.direction === MessageDirection.IN,
+            type: quoted.type,
+            mediaUrl: quoted.mediaUrl,
+          };
+        }
+      }
+
+      const created = await this.prisma.message.create({
         data: {
           conversationId: conversation.id,
           direction: MessageDirection.IN,
@@ -184,6 +217,8 @@ export class ChatService {
           fileName: payload.fileName,
           whatsappMessageId: payload.messageId,
           whatsappTimestamp: new Date(payload.timestamp),
+          replyToId,
+          replyToWamid: payload.replyToWamid,
         },
       });
 
@@ -195,7 +230,7 @@ export class ChatService {
         payload.organizationId,
         conversation.id,
         {
-          id: payload.messageId,
+          id: created.id,
           conversationId: conversation.id,
           fromUser: true,
           text: payload.text,
@@ -204,6 +239,8 @@ export class ChatService {
           mimeType: payload.mimeType,
           fileName: payload.fileName,
           type: payload.type || MessageType.TEXT,
+          replyTo: replyToSnapshot,
+          isReply: !!payload.replyToWamid,
         } as any,
       );
     }
@@ -262,6 +299,7 @@ export class ChatService {
       take: take + 1,
       cursor: cursor ? { id: cursor } : undefined,
       orderBy: { whatsappTimestamp: 'desc' },
+      include: { replyTo: true },
     });
 
     let nextCursor: string | null = null;
@@ -282,6 +320,16 @@ export class ChatService {
       mimeType: m.mimeType,
       fileName: m.fileName,
       status: m.status,
+      replyTo: m.replyTo
+        ? {
+            id: m.replyTo.id,
+            text: m.replyTo.body,
+            fromUser: m.replyTo.direction === MessageDirection.IN,
+            type: m.replyTo.type,
+            mediaUrl: m.replyTo.mediaUrl,
+          }
+        : undefined,
+      isReply: !!(m.replyToId || m.replyToWamid),
     }));
 
     return { messages, nextCursor };
@@ -447,13 +495,34 @@ export class ChatService {
     text: string;
     fromAi?: boolean;
     sentByUserId?: string | null;
+    replyToId?: string;
   }): Promise<Message> {
     const conv = await this.assertCanSendAndGetConversation(params.organizationId, params.conversationId);
     const lastUserMessageAt = conv.lastUserMessageAt ? new Date(conv.lastUserMessageAt) : null;
+
+    let replyToSnapshot: Message['replyTo'];
+    let replyToWamid: string | undefined;
+    if (params.replyToId) {
+      const quoted = await this.prisma.message.findFirst({
+        where: { id: params.replyToId, conversationId: params.conversationId },
+      });
+      if (quoted) {
+        replyToWamid = quoted.whatsappMessageId;
+        replyToSnapshot = {
+          id: quoted.id,
+          text: quoted.body,
+          fromUser: quoted.direction === MessageDirection.IN,
+          type: quoted.type,
+          mediaUrl: quoted.mediaUrl,
+        };
+      }
+    }
+
     const { messageId } = await this.whatsapp.sendTextMessage(params.organizationId, {
       to: conv.contact.phone,
       text: params.text,
       lastUserMessageAt,
+      replyToWamid,
     });
     const now = new Date();
     const created = await this.prisma.message.create({
@@ -467,6 +536,7 @@ export class ChatService {
         whatsappTimestamp: now,
         fromAi: params.fromAi ?? false,
         sentByUserId: params.sentByUserId ?? null,
+        replyToId: replyToSnapshot?.id,
       },
     });
     const msg: Message = {
@@ -477,6 +547,8 @@ export class ChatService {
       timestamp: created.whatsappTimestamp.getTime(),
       fromAi: created.fromAi ?? undefined,
       status: created.status,
+      replyTo: replyToSnapshot,
+      isReply: !!replyToSnapshot,
     };
     this.chatGateway.emitNewMessage(params.organizationId, params.conversationId, msg);
     await this.ensureCampaignAssignment(params.organizationId, conv.contact.id, params.conversationId);

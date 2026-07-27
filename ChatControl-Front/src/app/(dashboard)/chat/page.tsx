@@ -56,6 +56,14 @@ function SparklesIcon({ style }: { style?: React.CSSProperties }) {
   );
 }
 
+function ReplyIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '1rem', height: '1rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 17 4 12 9 7" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+    </svg>
+  );
+}
+
 function SendIcon({ style }: { style?: React.CSSProperties }) {
   return (
     <svg style={{ width: '1.1rem', height: '1.1rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -128,6 +136,7 @@ export default function ChatPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [replyInput, setReplyInput] = useState('');
+  const [replyTarget, setReplyTarget] = useState<Message | null>(null);
   const [sending, setSending] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [typingHint, setTypingHint] = useState('');
@@ -332,7 +341,9 @@ export default function ChatPage() {
   async function handleSend() {
     if (!selectedId || !replyInput.trim() || sending || !canSend || sendingRef.current) return;
     const text = replyInput.trim();
+    const quoted = replyTarget;
     setReplyInput('');
+    setReplyTarget(null);
     setSending(true);
     sendingRef.current = true;
     const tempId = `temp_${Date.now()}`;
@@ -343,10 +354,11 @@ export default function ChatPage() {
       text,
       timestamp: Date.now(),
       status: 'SENDING',
+      replyTo: quoted ? { id: quoted.id, text: quoted.text, fromUser: quoted.fromUser, type: quoted.type, mediaUrl: quoted.mediaUrl } : undefined,
     };
     setMessages(prev => [...prev, optimistic]);
     try {
-      const res = await sendMessage(selectedId, text);
+      const res = await sendMessage(selectedId, text, quoted?.id);
       setMessages(prev => {
         // Si el WS ya agregó el mensaje real, solo eliminar el temp
         if (res?.message && prev.some(m => m.id === res.message.id)) {
@@ -362,6 +374,7 @@ export default function ChatPage() {
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== tempId));
       setReplyInput(text);
+      setReplyTarget(quoted);
     } finally {
       setSending(false);
       sendingRef.current = false;
@@ -731,16 +744,16 @@ export default function ChatPage() {
                             {dayLabel(m.timestamp)}
                           </div>
                         )}
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: isAgent ? 'flex-end' : 'flex-start', maxWidth: '75%', alignSelf: isAgent ? 'flex-end' : 'flex-start' }}>
-                        <div style={{ 
-                          padding: (isImage || isVideo) && !m.text ? '0' : '1rem 1.25rem', 
+                        <div id={`msg-${m.id}`} style={{ display: 'flex', flexDirection: 'column', alignItems: isAgent ? 'flex-end' : 'flex-start', maxWidth: '75%', alignSelf: isAgent ? 'flex-end' : 'flex-start' }}>
+                        <div style={{
+                          padding: (isImage || isVideo) && !m.text ? '0' : '1rem 1.25rem',
                           borderRadius: isAgent ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
                           background: isSticker
                             ? 'transparent'
                             : (isImage || isVideo) && !m.text
                               ? 'transparent'
-                              : isAgent 
-                                ? 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)' 
+                              : isAgent
+                                ? 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)'
                                 : '#1A1A1A',
                           color: 'white',
                           fontSize: '0.95rem',
@@ -749,6 +762,37 @@ export default function ChatPage() {
                           border: isSticker || ((isImage || isVideo) && !m.text) ? 'none' : isAgent ? 'none' : '1px solid rgba(255,255,255,0.05)',
                           overflow: 'hidden'
                         }}>
+                          {m.replyTo && (
+                            <div
+                              onClick={() => document.getElementById(`msg-${m.replyTo!.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                              style={{
+                                display: 'flex', flexDirection: 'column', gap: '0.15rem',
+                                background: 'rgba(0,0,0,0.18)', borderLeft: '3px solid rgba(255,255,255,0.6)',
+                                borderRadius: '8px', padding: '0.4rem 0.6rem', marginBottom: '0.6rem', cursor: 'pointer',
+                              }}
+                            >
+                              <span style={{ fontSize: '0.7rem', fontWeight: 800, color: 'rgba(255,255,255,0.85)' }}>
+                                {m.replyTo.fromUser ? (selectedConv?.name || 'Contacto') : 'Tú'}
+                              </span>
+                              <span style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.65)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {m.replyTo.text || (m.replyTo.type && m.replyTo.type !== 'TEXT' ? `📎 ${m.replyTo.type}` : '')}
+                              </span>
+                            </div>
+                          )}
+                          {!m.replyTo && m.isReply && (
+                            <div
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: '0.35rem',
+                                background: 'rgba(0,0,0,0.18)', borderLeft: '3px solid rgba(255,255,255,0.35)',
+                                borderRadius: '8px', padding: '0.4rem 0.6rem', marginBottom: '0.6rem',
+                              }}
+                            >
+                              <ReplyIcon style={{ width: '0.7rem', height: '0.7rem', color: 'rgba(255,255,255,0.5)' }} />
+                              <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)', fontStyle: 'italic' }}>
+                                Respondiendo a un mensaje no disponible
+                              </span>
+                            </div>
+                          )}
                           {hasMedia && (
                             <div style={{ marginBottom: m.text ? '0.75rem' : '0' }}>
                               {isImage && (
@@ -827,6 +871,14 @@ export default function ChatPage() {
                               </svg>
                             </span>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => setReplyTarget(m)}
+                            title="Responder"
+                            style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, display: 'inline-flex', color: '#555' }}
+                          >
+                            <ReplyIcon style={{ width: '0.8rem', height: '0.8rem' }} />
+                          </button>
                           <span style={{ fontSize: '0.65rem', color: '#444', fontWeight: 700 }}>
                             {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
@@ -865,6 +917,19 @@ export default function ChatPage() {
                     {uploading ? <Spinner size={12} /> : null}
                     {uploading ? 'Subiendo...' : 'Enviar'}
                   </button>
+                </div>
+              )}
+              {replyTarget && (
+                <div style={{ marginBottom: '0.75rem', padding: '0.6rem 1rem', background: '#0D0D0D', border: '1px solid rgba(255,255,255,0.08)', borderLeft: '3px solid #EF4444', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#EF4444' }}>
+                      Respondiendo a {replyTarget.fromUser ? (selectedConv?.name || 'Contacto') : 'ti'}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#8C8C8C', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {replyTarget.text || (replyTarget.type && replyTarget.type !== 'TEXT' ? `📎 ${replyTarget.type}` : '')}
+                    </div>
+                  </div>
+                  <button onClick={() => setReplyTarget(null)} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '8px', color: '#8C8C8C', padding: '0.4rem 0.6rem', cursor: 'pointer', fontSize: '0.85rem' }}>✕</button>
                 </div>
               )}
               <div style={{ background: '#0D0D0D', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '20px', padding: '0.5rem', display: 'flex', alignItems: 'flex-end', gap: '0.5rem', boxShadow: '0 -10px 40px rgba(0,0,0,0.5)' }}>

@@ -3,11 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import { MessageDirection, MessageStatus, MessageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatService } from '../chat/chat.service';
-import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { WhatsAppService, MetaTemplateDto } from '../whatsapp/whatsapp.service';
 import { AiService } from '../ai/ai.service';
 import { SettingsService } from '../settings/settings.service';
 import { TemplatesService } from '../templates/templates.service';
 import { ChatGateway } from '../chat/chat.gateway';
+import { StorageService } from '../common/storage.service';
 
 export type BroadcastMessageType = 'manual' | 'template' | 'ia';
 
@@ -28,6 +29,8 @@ export interface BroadcastTemplate {
   name: string;
   body: string;
   variables: string[];
+  header?: { format: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT'; variables: string[] };
+  buttons?: Array<{ index: number; type: string; text: string }>;
 }
 
 @Injectable()
@@ -41,7 +44,20 @@ export class BroadcastService {
     private readonly templates: TemplatesService,
     private readonly gateway: ChatGateway,
     private readonly config: ConfigService,
+    private readonly storage: StorageService,
   ) {}
+
+  /** Sube el archivo elegido para el header de una plantilla oficial y retorna su URL pública. */
+  async uploadTemplateHeaderMedia(
+    organizationId: string,
+    file: { originalname: string; buffer: Buffer; mimetype: string },
+  ): Promise<string> {
+    const timestamp = Date.now();
+    const path = `broadcast/${organizationId}/${timestamp}_${file.originalname}`;
+    const url = await this.storage.uploadFile('chat-media', path, file.buffer, file.mimetype);
+    if (!url) throw new BadRequestException('No se pudo subir el archivo del encabezado');
+    return url;
+  }
 
   /** Crea conversaciones para contactos que aún no tienen una, en un solo batch (evita N+1). */
   private async ensureConversationsExist(organizationId: string): Promise<void> {
@@ -162,7 +178,14 @@ export class BroadcastService {
   async getTemplates(organizationId: string): Promise<BroadcastTemplate[]> {
     const meta = await this.whatsapp.getMessageTemplates(organizationId);
     if (meta.length > 0) {
-      return meta.map((t) => ({ id: t.id, name: t.name, body: t.body, variables: t.variables }));
+      return meta.map((t) => ({
+        id: t.id,
+        name: t.name,
+        body: t.body,
+        variables: t.variables,
+        header: t.header ? { format: t.header.format, variables: t.header.variables } : undefined,
+        buttons: t.buttons,
+      }));
     }
     const list = await this.templates.findAll(organizationId);
     return list.map((t) => ({ id: t.id, name: t.name, body: t.body, variables: t.variables }));
@@ -183,6 +206,9 @@ export class BroadcastService {
     text: string;
     templateId?: string;
     templateVariables?: Record<string, string>;
+    templateAutoNameVariables?: string[];
+    templateHeaderValue?: string;
+    templateButtonVariables?: Record<string, string>;
   }): Promise<{ sent: number; failed: number; errors: Array<{ conversationId: string; error: string }> }> {
     const { organizationId, userId, conversationIds, type, text } = params;
     if (!conversationIds?.length) {
@@ -196,25 +222,21 @@ export class BroadcastService {
     let messageToSend = '';
     let metaTemplateName = '';
     let metaTemplateLanguage = '';
-    let metaBodyParams: string[] = [];
-    let metaBodyTextForChat = '';
+    let metaT: MetaTemplateDto | null = null;
     if (type === 'template' && params.templateId) {
       if (isMetaTemplate) {
         const metaList = await this.whatsapp.getMessageTemplates(organizationId);
-        const metaT = metaList.find((t) => t.id === params.templateId);
+        metaT = metaList.find((t) => t.id === params.templateId) ?? null;
         if (!metaT) throw new BadRequestException('Plantilla de Meta no encontrada');
         const parsed = this.parseMetaTemplateId(params.templateId);
         if (!parsed) throw new BadRequestException('ID de plantilla Meta inválido');
         metaTemplateName = parsed.name;
         metaTemplateLanguage = parsed.language;
-        metaBodyParams = metaT.variables.map((v) => params.templateVariables?.[v] ?? '');
-        metaBodyTextForChat = metaT.body;
-        metaT.variables.forEach((v, idx) => {
-          metaBodyTextForChat = metaBodyTextForChat.replace(
-            new RegExp(`\\{\\{${v}\\}\\}`, 'g'),
-            metaBodyParams[idx] ?? '',
+        if (metaT.header && metaT.header.format !== 'TEXT' && !params.templateHeaderValue?.trim()) {
+          throw new BadRequestException(
+            `Esta plantilla requiere un archivo de ${metaT.header.format.toLowerCase()} para el encabezado`,
           );
-        });
+        }
       } else {
         messageToSend = await this.resolveTemplateBody(organizationId, params.templateId, params.templateVariables);
       }
@@ -274,15 +296,39 @@ export class BroadcastService {
 
       try {
         if (type === 'template') {
-          if (isMetaTemplate) {
+          if (isMetaTemplate && metaT) {
+            const bodyVariables = this.resolveMetaBodyVariables(
+              metaT,
+              params.templateVariables,
+              params.templateAutoNameVariables,
+              contact.name,
+            );
+            const components = this.buildMetaTemplateComponents(
+              metaT,
+              bodyVariables,
+              params.templateHeaderValue,
+              params.templateButtonVariables,
+            );
+            let bodyTextForChat = metaT.body;
+            metaT.variables.forEach((v) => {
+              bodyTextForChat = bodyTextForChat.replace(
+                new RegExp(`\\{\\{\\s*${v}\\s*\\}\\}`, 'g'),
+                bodyVariables[v] ?? '',
+              );
+            });
+            const headerMedia =
+              metaT.header && metaT.header.format !== 'TEXT' && params.templateHeaderValue
+                ? { type: metaT.header.format as MessageType, mediaUrl: params.templateHeaderValue }
+                : undefined;
             await this.sendMetaTemplateToConversation(
               organizationId,
               userId,
               conversationId,
               metaTemplateName,
               metaTemplateLanguage,
-              metaBodyParams,
-              metaBodyTextForChat,
+              components,
+              bodyTextForChat,
+              headerMedia,
             );
           } else {
             await this.sendTemplateToConversation(organizationId, userId, conversationId, messageToSend);
@@ -342,14 +388,87 @@ export class BroadcastService {
     return body;
   }
 
+  /** Resuelve el valor de cada variable del body: fijo (mismo para todos) o el nombre del contacto (por contacto). */
+  private resolveMetaBodyVariables(
+    metaT: MetaTemplateDto,
+    fixedVariables: Record<string, string> | undefined,
+    autoNameVariables: string[] | undefined,
+    contactName: string | undefined,
+  ): Record<string, string> {
+    const result: Record<string, string> = {};
+    for (const v of metaT.variables) {
+      result[v] = autoNameVariables?.includes(v)
+        ? contactName?.trim() || ''
+        : fixedVariables?.[v] ?? '';
+    }
+    return result;
+  }
+
+  /** Arma los componentes (header/body/buttons) para el envío de una plantilla oficial de Meta. */
+  private buildMetaTemplateComponents(
+    metaT: MetaTemplateDto,
+    bodyVariables: Record<string, string> | undefined,
+    headerValue: string | undefined,
+    buttonVariables: Record<string, string> | undefined,
+  ): Array<Record<string, unknown>> {
+    const components: Array<Record<string, unknown>> = [];
+    const toParam = (name: string, value: string) =>
+      /^\d+$/.test(name)
+        ? { type: 'text', text: value }
+        : { type: 'text', parameter_name: name, text: value };
+
+    if (metaT.header) {
+      if (metaT.header.format === 'TEXT') {
+        if (metaT.header.variables.length > 0) {
+          components.push({
+            type: 'header',
+            parameters: metaT.header.variables.map((v) => toParam(v, headerValue ?? '')),
+          });
+        }
+      } else {
+        if (!headerValue?.trim()) {
+          throw new BadRequestException(
+            `Esta plantilla requiere una URL de ${metaT.header.format.toLowerCase()} para el encabezado`,
+          );
+        }
+        const key = metaT.header.format.toLowerCase();
+        components.push({
+          type: 'header',
+          parameters: [{ type: key, [key]: { link: headerValue.trim() } }],
+        });
+      }
+    }
+
+    if (metaT.variables.length > 0) {
+      components.push({
+        type: 'body',
+        parameters: metaT.variables.map((v) => toParam(v, bodyVariables?.[v] ?? '')),
+      });
+    }
+
+    if (metaT.buttons?.length) {
+      for (const btn of metaT.buttons) {
+        components.push({
+          type: 'button',
+          sub_type: 'url',
+          index: String(btn.index),
+          parameters: [{ type: 'text', text: buttonVariables?.[String(btn.index)] ?? '' }],
+        });
+      }
+    }
+
+    return components;
+  }
+
   private async sendMetaTemplateToConversation(
     organizationId: string,
     userId: string | null,
     conversationId: string,
     templateName: string,
     language: string,
-    bodyParams: string[],
+    components: Array<Record<string, unknown>>,
     bodyTextForChat: string,
+    headerMedia?: { type: MessageType; mediaUrl: string },
   ): Promise<void> {
     await this.settings.checkDailyLimitOrThrow(conversationId, organizationId);
     const conv = await this.prisma.conversation.findFirst({
@@ -368,21 +487,22 @@ export class BroadcastService {
       conv.contact.phone,
       templateName,
       language,
-      bodyParams,
+      components,
     );
     const now = new Date();
-    const displayText = bodyTextForChat.trim() || bodyParams.join(' ');
+    const displayText = bodyTextForChat.trim() || 'Plantilla enviada';
     const created = await this.prisma.message.create({
       data: {
         conversationId,
         direction: MessageDirection.OUT,
-        type: MessageType.TEXT,
+        type: headerMedia?.type ?? MessageType.TEXT,
         status: MessageStatus.SENT,
         body: displayText,
         whatsappMessageId: messageId,
         whatsappTimestamp: now,
         fromAi: false,
         sentByUserId: userId,
+        mediaUrl: headerMedia?.mediaUrl,
       },
     });
     this.gateway.emitNewMessage(organizationId, conversationId, {
@@ -391,7 +511,8 @@ export class BroadcastService {
       fromUser: false,
       text: displayText,
       timestamp: now.getTime(),
-      type: MessageType.TEXT,
+      type: created.type,
+      mediaUrl: created.mediaUrl,
     });
   }
 

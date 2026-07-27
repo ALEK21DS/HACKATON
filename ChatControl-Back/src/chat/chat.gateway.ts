@@ -28,6 +28,14 @@ export interface NewMessagePayload {
     mediaUrl?: string | null;
     mimeType?: string | null;
     fileName?: string | null;
+    replyTo?: {
+      id: string;
+      text: string;
+      fromUser: boolean;
+      type?: string;
+      mediaUrl?: string | null;
+    } | null;
+    isReply?: boolean;
   };
   companyId?: string;
 }
@@ -205,11 +213,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         mediaUrl: message.mediaUrl,
         mimeType: message.mimeType,
         fileName: message.fileName,
+        replyTo: message.replyTo,
+        isReply: message.isReply,
       },
       companyId: organizationId,
     };
     this.server.to(`org:${organizationId}`).emit('new_message', payload);
-    this.server.to(`conversation:${conversationId}`).emit('new_message', payload);
   }
 
   emitConversationAssigned(organizationId: string, conversationId: string, assignedToUserId: string): void {
@@ -230,7 +239,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   emitBroadcastMessageSent(organizationId: string, conversationId: string, index: number): void {
     this.server.to(`org:${organizationId}`).emit('broadcast_message_sent', { conversationId, index });
-    this.server.to(`conversation:${conversationId}`).emit('broadcast_message_sent', { conversationId, index });
   }
 
   emitMessageEdited(organizationId: string, conversationId: string, messageId: string, newText: string): void {
@@ -240,16 +248,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       newText,
     };
     this.server.to(`org:${organizationId}`).emit('message_edited', payload);
-    this.server.to(`conversation:${conversationId}`).emit('message_edited', payload);
   }
 
   emitMessageStatusUpdate(organizationId: string, conversationId: string, messageId: string, status: string): void {
     this.server.to(`org:${organizationId}`).emit('message_status', {
-      conversationId,
-      messageId,
-      status,
-    });
-    this.server.to(`conversation:${conversationId}`).emit('message_status', {
       conversationId,
       messageId,
       status,
@@ -264,6 +266,5 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ): void {
     const p = { conversationId, index, errorMessage };
     this.server.to(`org:${organizationId}`).emit('broadcast_message_failed', p);
-    this.server.to(`conversation:${conversationId}`).emit('broadcast_message_failed', p);
   }
 }
