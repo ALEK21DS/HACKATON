@@ -28,6 +28,10 @@ class SendMessageDto {
   @IsString()
   @IsNotEmpty()
   text!: string;
+
+  @IsOptional()
+  @IsString()
+  replyToId?: string;
 }
 
 class AssignConversationDto {
@@ -116,6 +120,7 @@ export class ChatController {
       conversationId: id,
       text: dto.text,
       sentByUserId: user.userId,
+      replyToId: dto.replyToId,
     });
     return { ok: true, message: msg };
   }

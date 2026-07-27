@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -65,6 +66,14 @@ export class BroadcastController {
     return this.broadcast.getTemplates(user.organizationId!);
   }
 
+  @Post('template-media')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 16 * 1024 * 1024 } }))
+  async uploadTemplateMedia(@CurrentUser() user: AuthUser, @UploadedFile() file: any) {
+    if (!file) throw new BadRequestException('Archivo no proveído');
+    const url = await this.broadcast.uploadTemplateHeaderMedia(user.organizationId!, file);
+    return { url };
+  }
+
   @Post('generate-message')
   async generateMessage(@CurrentUser() user: AuthUser, @Body() dto: GenerateBroadcastMessageDto) {
     const { text, usedFallbackModel } = await this.broadcast.generateMessage(
@@ -84,6 +93,9 @@ export class BroadcastController {
       text: dto.text ?? '',
       templateId: dto.templateId,
       templateVariables: dto.templateVariables,
+      templateAutoNameVariables: dto.templateAutoNameVariables,
+      templateHeaderValue: dto.templateHeaderValue,
+      templateButtonVariables: dto.templateButtonVariables,
     });
   }
 

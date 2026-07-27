@@ -93,6 +93,13 @@ export class WhatsAppController {
                 timestamp: string;
                 type: string;
                 text?: { body: string };
+                button?: { text: string; payload?: string };
+                interactive?: {
+                  type: string;
+                  button_reply?: { id: string; title: string };
+                  list_reply?: { id: string; title: string };
+                };
+                context?: { from: string; id: string };
               }>;
               statuses?: Array<{
                 id: string;
@@ -146,6 +153,8 @@ export class WhatsAppController {
           const pushName = contactsList.find(c => c.wa_id === msg.from)?.profile?.name;
           const isMedia = ['image', 'video', 'audio', 'document', 'sticker'].includes(msg.type);
 
+          this.logger.log(`Mensaje entrante type=${msg.type} context=${JSON.stringify((msg as any).context)}`);
+
           if (msg.type === 'text' && msg.text?.body) {
             await this.chat.registerIncomingMessage({
               organizationId,
@@ -155,6 +164,30 @@ export class WhatsAppController {
               timestamp: parseInt(msg.timestamp, 10) * 1000,
               text: msg.text.body,
               type: MessageType.TEXT,
+              replyToWamid: msg.context?.id,
+            });
+          } else if (msg.type === 'button' && msg.button?.text) {
+            await this.chat.registerIncomingMessage({
+              organizationId,
+              from: msg.from,
+              contactName: pushName,
+              messageId: msg.id,
+              timestamp: parseInt(msg.timestamp, 10) * 1000,
+              text: msg.button.text,
+              type: MessageType.TEXT,
+              replyToWamid: msg.context?.id,
+            });
+          } else if (msg.type === 'interactive' && (msg.interactive?.button_reply || msg.interactive?.list_reply)) {
+            const replyText = msg.interactive.button_reply?.title || msg.interactive.list_reply?.title || '';
+            await this.chat.registerIncomingMessage({
+              organizationId,
+              from: msg.from,
+              contactName: pushName,
+              messageId: msg.id,
+              timestamp: parseInt(msg.timestamp, 10) * 1000,
+              text: replyText,
+              type: MessageType.TEXT,
+              replyToWamid: msg.context?.id,
             });
           } else if (isMedia) {
             const mediaData = (msg as any)[msg.type];
@@ -182,6 +215,7 @@ export class WhatsAppController {
                     mediaUrl,
                     mimeType: downloaded.mimeType,
                     fileName: mediaData.filename || undefined,
+                    replyToWamid: msg.context?.id,
                   });
                 } else {
                   this.logger.error(`No se pudo subir a Supabase el archivo de WhatsApp ${mediaId}`);

@@ -8,6 +8,19 @@ export interface SendTextMessageDto {
   to: string;
   text: string;
   lastUserMessageAt: Date | number | null;
+  replyToWamid?: string;
+}
+
+export interface MetaTemplateHeader {
+  format: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT';
+  text?: string;
+  variables: string[];
+}
+
+export interface MetaTemplateButton {
+  index: number;
+  type: string;
+  text: string;
 }
 
 export interface MetaTemplateDto {
@@ -18,6 +31,19 @@ export interface MetaTemplateDto {
   language: string;
   category?: string;
   status?: string;
+  header?: MetaTemplateHeader;
+  buttons?: MetaTemplateButton[];
+}
+
+/** Extrae nombres de variables ({{1}} numeradas o {{nombre}} con nombre), sin duplicados. */
+function extractTemplateVariables(text: string): string[] {
+  const found: string[] = [];
+  const matches = text.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g);
+  for (const m of matches) {
+    if (!found.includes(m[1])) found.push(m[1]);
+  }
+  const allNumeric = found.every((v) => /^\d+$/.test(v));
+  return allNumeric ? found.sort((a, b) => Number(a) - Number(b)) : found;
 }
 
 export interface ResolvedWhatsappCreds {
@@ -86,13 +112,14 @@ export class WhatsAppService {
         'Ventana de 24 horas cerrada. No se puede enviar mensaje libre. El usuario debe escribir primero.',
       );
     }
-    return this.sendTextMessageRaw(organizationId, dto.to, dto.text);
+    return this.sendTextMessageRaw(organizationId, dto.to, dto.text, dto.replyToWamid);
   }
 
   async sendTextMessageRaw(
     organizationId: string,
     to: string,
     text: string,
+    replyToWamid?: string,
   ): Promise<{ messageId: string }> {
     const { accessToken, phoneNumberId } = await this.resolveCredentials(organizationId);
     const normalized = to.replace(/\D/g, '');
@@ -104,6 +131,7 @@ export class WhatsAppService {
       to: normalized,
       type: 'text',
       text: { body: text },
+      ...(replyToWamid ? { context: { message_id: replyToWamid } } : {}),
     };
     const res = await fetch(url, {
       method: 'POST',
@@ -146,7 +174,9 @@ export class WhatsAppService {
         category?: string;
         components?: Array<{
           type: string;
+          format?: string;
           text?: string;
+          buttons?: Array<{ type: string; text: string; url?: string; phone_number?: string }>;
           example?: { body_text?: string[][]; header_text?: string[] };
         }>;
       }>;
@@ -158,12 +188,34 @@ export class WhatsAppService {
     for (const t of list) {
       const bodyComp = t.components?.find((c) => c.type === 'BODY');
       const body = bodyComp?.text ?? '';
-      const variables: string[] = [];
-      const matches = body.matchAll(/\{\{(\d+)\}\}/g);
-      for (const m of matches) {
-        const num = m[1];
-        if (!variables.includes(num)) variables.push(num);
+      const variables = extractTemplateVariables(body);
+
+      let header: MetaTemplateHeader | undefined;
+      const headerComp = t.components?.find((c) => c.type === 'HEADER');
+      if (headerComp) {
+        const format = (headerComp.format ?? 'TEXT') as MetaTemplateHeader['format'];
+        if (format === 'TEXT') {
+          const headerVars = extractTemplateVariables(headerComp.text ?? '');
+          if (headerVars.length > 0) {
+            header = { format, text: headerComp.text, variables: headerVars };
+          }
+        } else if (format === 'IMAGE' || format === 'VIDEO' || format === 'DOCUMENT') {
+          header = { format, variables: [] };
+        }
       }
+
+      let buttons: MetaTemplateButton[] | undefined;
+      const buttonsComp = t.components?.find((c) => c.type === 'BUTTONS');
+      if (buttonsComp?.buttons?.length) {
+        const dynamic: MetaTemplateButton[] = [];
+        buttonsComp.buttons.forEach((b, index) => {
+          if (b.type === 'URL' && b.url && /\{\{\s*[a-zA-Z0-9_]+\s*\}\}/.test(b.url)) {
+            dynamic.push({ index, type: b.type, text: b.text });
+          }
+        });
+        if (dynamic.length) buttons = dynamic;
+      }
+
       out.push({
         id: `meta_${t.name}_${t.language}`,
         name: `${t.name} (${t.language})`,
@@ -172,6 +224,8 @@ export class WhatsAppService {
         language: t.language,
         category: t.category,
         status: t.status,
+        header,
+        buttons,
       });
     }
     return out;
@@ -227,13 +281,12 @@ export class WhatsAppService {
     to: string,
     templateName: string,
     language: string,
-    bodyParams: string[],
+    components: Array<Record<string, unknown>>,
   ): Promise<{ messageId: string }> {
     const { accessToken, phoneNumberId } = await this.resolveCredentials(organizationId);
     const normalized = to.replace(/\D/g, '');
     if (!normalized) throw new BadRequestException('Número de destino inválido');
     const url = `${this.baseUrl}/${phoneNumberId}/messages`;
-    const bodyParamsFormatted = bodyParams.map((text) => ({ type: 'text' as const, text }));
     const body = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -242,9 +295,7 @@ export class WhatsAppService {
       template: {
         name: templateName,
         language: { code: language },
-        components: bodyParamsFormatted.length
-          ? [{ type: 'body' as const, parameters: bodyParamsFormatted }]
-          : [],
+        components,
       },
     };
     const res = await fetch(url, {

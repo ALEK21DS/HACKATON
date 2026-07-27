@@ -17,6 +17,7 @@ import {
   previewBroadcastLists,
   getCampaigns,
   importExcelContacts,
+  uploadBroadcastTemplateMedia,
   type BroadcastListPreview,
   type BroadcastContact,
   type BroadcastTemplate,
@@ -67,6 +68,45 @@ function SparklesIcon({ style }: { style?: React.CSSProperties }) {
   );
 }
 
+function renderTemplatePreviewNodes(
+  body: string,
+  vars: Record<string, string>,
+  modes: Record<string, 'fixed' | 'contact_name'>,
+): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const regex = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  while ((match = regex.exec(body)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(<span key={key++}>{body.slice(lastIndex, match.index)}</span>);
+    }
+    const varName = match[1];
+    const isAutoName = modes[varName] === 'contact_name';
+    const value = vars[varName];
+    nodes.push(
+      <span
+        key={key++}
+        style={{
+          background: isAutoName ? 'rgba(59,130,246,0.15)' : value ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+          color: isAutoName ? '#3B82F6' : value ? '#22C55E' : '#EF4444',
+          borderRadius: '4px',
+          padding: '0 4px',
+          fontWeight: 700,
+        }}
+      >
+        {isAutoName ? 'Nombre del contacto' : value || `{{${varName}}}`}
+      </span>
+    );
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < body.length) {
+    nodes.push(<span key={key++}>{body.slice(lastIndex)}</span>);
+  }
+  return nodes;
+}
+
 export default function BroadcastPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -94,6 +134,13 @@ export default function BroadcastPage() {
   const [text, setText] = useState('');
   const [templateId, setTemplateId] = useState('');
   const [templateVars, setTemplateVars] = useState<Record<string, string>>({});
+  const [templateVarModes, setTemplateVarModes] = useState<Record<string, 'fixed' | 'contact_name'>>({});
+  const [templateHeaderValue, setTemplateHeaderValue] = useState('');
+  const [templateHeaderFileName, setTemplateHeaderFileName] = useState('');
+  const [templateHeaderPreviewUrl, setTemplateHeaderPreviewUrl] = useState('');
+  const [templateHeaderUploading, setTemplateHeaderUploading] = useState(false);
+  const [templateHeaderUploadError, setTemplateHeaderUploadError] = useState('');
+  const [templateButtonVars, setTemplateButtonVars] = useState<Record<string, string>>({});
   const [instruction, setInstruction] = useState('');
   const [generatedText, setGeneratedText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -315,6 +362,30 @@ export default function BroadcastPage() {
     } catch (err) {} finally { setGenerating(false); }
   };
 
+  useEffect(() => {
+    return () => {
+      if (templateHeaderPreviewUrl) URL.revokeObjectURL(templateHeaderPreviewUrl);
+    };
+  }, [templateHeaderPreviewUrl]);
+
+  const handleHeaderFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setTemplateHeaderPreviewUrl(URL.createObjectURL(file));
+    setTemplateHeaderUploading(true);
+    setTemplateHeaderUploadError('');
+    try {
+      const { url } = await uploadBroadcastTemplateMedia(file);
+      setTemplateHeaderValue(url);
+      setTemplateHeaderFileName(file.name);
+    } catch (err) {
+      setTemplateHeaderUploadError(err instanceof Error ? err.message : 'Error al subir el archivo.');
+    } finally {
+      setTemplateHeaderUploading(false);
+      e.target.value = '';
+    }
+  };
+
   const handleSend = async () => {
     if (sending) return;
     setSending(true);
@@ -327,6 +398,11 @@ export default function BroadcastPage() {
         text: messageType !== 'template' ? (generatedText || text) : undefined,
         templateId: messageType === 'template' ? templateId : undefined,
         templateVariables: messageType === 'template' ? templateVars : undefined,
+        templateAutoNameVariables: messageType === 'template'
+          ? Object.entries(templateVarModes).filter(([, mode]) => mode === 'contact_name').map(([v]) => v)
+          : undefined,
+        templateHeaderValue: messageType === 'template' ? templateHeaderValue : undefined,
+        templateButtonVariables: messageType === 'template' ? templateButtonVars : undefined,
       });
       if (result.sent === 0 && result.failed > 0) {
         setSendError(`No se envió ningún mensaje (${result.failed} fallidos). ${result.errors[0]?.error ?? ''}`);
@@ -338,6 +414,8 @@ export default function BroadcastPage() {
         }
         setSelectedIds(new Set());
         setText(''); setInstruction(''); setGeneratedText('');
+        setTemplateVarModes({});
+        setTemplateHeaderValue(''); setTemplateHeaderFileName(''); setTemplateHeaderPreviewUrl(''); setTemplateButtonVars({});
       }
     } catch (err) {
       setSendError(err instanceof Error ? err.message : 'Error al enviar el masivo.');
@@ -968,7 +1046,16 @@ export default function BroadcastPage() {
                   <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Selecciona una Plantilla</label>
                   <select 
                     value={templateId}
-                    onChange={(e) => setTemplateId(e.target.value)}
+                    onChange={(e) => {
+                      setTemplateId(e.target.value);
+                      setTemplateVars({});
+                      setTemplateVarModes({});
+                      setTemplateHeaderValue('');
+                      setTemplateHeaderFileName('');
+                      setTemplateHeaderPreviewUrl('');
+                      setTemplateHeaderUploadError('');
+                      setTemplateButtonVars({});
+                    }}
                     style={{ 
                       width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '1.25rem', color: 'white', outline: 'none', fontSize: '1rem', appearance: 'none',
                       backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23EF4444' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
@@ -986,16 +1073,138 @@ export default function BroadcastPage() {
                 </div>
 
                 {selectedTemplate && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Vista Previa del Mensaje</label>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '1.25rem', color: '#ddd', fontSize: '0.9rem', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+                      {renderTemplatePreviewNodes(selectedTemplate.body, templateVars, templateVarModes)}
+                    </div>
+                  </div>
+                )}
+
+                {selectedTemplate && selectedTemplate.variables.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Variables de la Plantilla</label>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                      {selectedTemplate.variables.map(v => (
-                        <input 
-                          key={v}
+                      {selectedTemplate.variables.map(v => {
+                        const mode = templateVarModes[v] || 'fixed';
+                        return (
+                          <div key={v} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#888', textTransform: 'uppercase' }}>{v}</span>
+                            <div style={{ display: 'flex', gap: '0.4rem' }}>
+                              <button
+                                type="button"
+                                onClick={() => setTemplateVarModes(prev => ({ ...prev, [v]: 'fixed' }))}
+                                style={{
+                                  flex: 1, padding: '0.5rem', borderRadius: '8px', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
+                                  border: mode === 'fixed' ? '1px solid #EF4444' : '1px solid rgba(255,255,255,0.08)',
+                                  background: mode === 'fixed' ? 'rgba(239,68,68,0.12)' : 'transparent',
+                                  color: mode === 'fixed' ? '#EF4444' : '#888',
+                                }}
+                              >
+                                Valor fijo
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setTemplateVarModes(prev => ({ ...prev, [v]: 'contact_name' }))}
+                                style={{
+                                  flex: 1, padding: '0.5rem', borderRadius: '8px', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
+                                  border: mode === 'contact_name' ? '1px solid #3B82F6' : '1px solid rgba(255,255,255,0.08)',
+                                  background: mode === 'contact_name' ? 'rgba(59,130,246,0.12)' : 'transparent',
+                                  color: mode === 'contact_name' ? '#3B82F6' : '#888',
+                                }}
+                              >
+                                Nombre del contacto
+                              </button>
+                            </div>
+                            {mode === 'fixed' ? (
+                              <input
+                                type="text"
+                                placeholder={v.toUpperCase()}
+                                value={templateVars[v] || ''}
+                                onChange={(e) => setTemplateVars(prev => ({ ...prev, [v]: e.target.value }))}
+                                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1rem', color: 'white', outline: 'none' }}
+                              />
+                            ) : (
+                              <p style={{ margin: 0, fontSize: '0.75rem', color: '#3B82F6' }}>
+                                Se reemplazará automáticamente por el nombre registrado de cada contacto.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {selectedTemplate?.header && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                      {selectedTemplate.header.format === 'TEXT'
+                        ? 'Variable del Encabezado'
+                        : `Archivo de ${selectedTemplate.header.format.toLowerCase()} para el Encabezado`}
+                    </label>
+                    {selectedTemplate.header.format === 'TEXT' ? (
+                      <input
+                        type="text"
+                        placeholder="VALOR"
+                        value={templateHeaderValue}
+                        onChange={(e) => setTemplateHeaderValue(e.target.value)}
+                        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1rem', color: 'white', outline: 'none' }}
+                      />
+                    ) : (
+                      <>
+                        <input
+                          type="file"
+                          accept={
+                            selectedTemplate.header.format === 'IMAGE' ? 'image/*'
+                              : selectedTemplate.header.format === 'VIDEO' ? 'video/*'
+                              : undefined
+                          }
+                          onChange={handleHeaderFileChange}
+                          disabled={templateHeaderUploading}
+                          style={{ color: 'white', fontSize: '0.85rem' }}
+                        />
+                        {templateHeaderPreviewUrl && selectedTemplate.header.format === 'IMAGE' && (
+                          <Image
+                            src={templateHeaderPreviewUrl}
+                            alt="Vista previa del encabezado"
+                            width={220}
+                            height={220}
+                            unoptimized
+                            style={{ maxWidth: '220px', maxHeight: '220px', width: 'auto', height: 'auto', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', objectFit: 'cover' }}
+                          />
+                        )}
+                        {templateHeaderPreviewUrl && selectedTemplate.header.format === 'VIDEO' && (
+                          // eslint-disable-next-line jsx-a11y/media-has-caption
+                          <video
+                            src={templateHeaderPreviewUrl}
+                            controls
+                            style={{ maxWidth: '260px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}
+                          />
+                        )}
+                        {templateHeaderUploading && <p style={{ margin: 0, fontSize: '0.75rem', color: '#999' }}>Subiendo archivo...</p>}
+                        {!templateHeaderUploading && templateHeaderFileName && (
+                          <p style={{ margin: 0, fontSize: '0.75rem', color: '#22C55E' }}>Archivo listo: {templateHeaderFileName}</p>
+                        )}
+                        {templateHeaderUploadError && (
+                          <p style={{ margin: 0, fontSize: '0.75rem', color: '#EF4444' }}>{templateHeaderUploadError}</p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {selectedTemplate?.buttons && selectedTemplate.buttons.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Variables de Botones</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                      {selectedTemplate.buttons.map(btn => (
+                        <input
+                          key={btn.index}
                           type="text"
-                          placeholder={v.toUpperCase()}
-                          value={templateVars[v] || ''}
-                          onChange={(e) => setTemplateVars(prev => ({ ...prev, [v]: e.target.value }))}
+                          placeholder={btn.text.toUpperCase()}
+                          value={templateButtonVars[String(btn.index)] || ''}
+                          onChange={(e) => setTemplateButtonVars(prev => ({ ...prev, [String(btn.index)]: e.target.value }))}
                           style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1rem', color: 'white', outline: 'none' }}
                         />
                       ))}
@@ -1044,12 +1253,22 @@ export default function BroadcastPage() {
               <span style={{ fontSize: '1.25rem', fontWeight: 900, color: 'white', display: 'block' }}>{selectedIds.size}</span>
               <span style={{ fontSize: '0.7rem', color: '#666', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Contactos Seleccionados</span>
             </div>
-            <button 
+            <button
               onClick={handleSend}
-              disabled={sending || selectedIds.size === 0}
-              style={{ 
+              disabled={
+                sending ||
+                selectedIds.size === 0 ||
+                templateHeaderUploading ||
+                (messageType === 'template' && !!selectedTemplate?.header && selectedTemplate.header.format !== 'TEXT' && !templateHeaderValue)
+              }
+              style={{
                 padding: '1.25rem 3rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '16px', color: 'white', fontWeight: 900, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.15em', cursor: 'pointer', transition: 'all 0.3s ease',
-                boxShadow: '0 10px 30px rgba(239, 68, 68, 0.4)', opacity: (sending || selectedIds.size === 0) ? 0.5 : 1,
+                boxShadow: '0 10px 30px rgba(239, 68, 68, 0.4)', opacity: (
+                  sending ||
+                  selectedIds.size === 0 ||
+                  templateHeaderUploading ||
+                  (messageType === 'template' && !!selectedTemplate?.header && selectedTemplate.header.format !== 'TEXT' && !templateHeaderValue)
+                ) ? 0.5 : 1,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'
               }}
             >

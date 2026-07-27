@@ -10,5 +10,8 @@ export interface BroadcastRepository {
     text?: string;
     templateId?: string;
     templateVariables?: Record<string, string>;
+    templateAutoNameVariables?: string[];
+    templateHeaderValue?: string;
+    templateButtonVariables?: Record<string, string>;
   }): Promise<{ sent: number; failed: number; errors: Array<{ conversationId: string; error: string }> }>;
 }

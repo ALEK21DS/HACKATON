@@ -139,6 +139,15 @@ export interface Message {
   mimeType?: string | null;
   fileName?: string | null;
   status?: string;
+  replyTo?: {
+    id: string;
+    text: string;
+    fromUser: boolean;
+    type?: string;
+    mediaUrl?: string | null;
+  } | null;
+  /** true si el mensaje es una respuesta a otro, aunque no podamos mostrar su contenido (ej. citó un mensaje ajeno a la plataforma). */
+  isReply?: boolean;
 }
 
 /** Payload del evento WebSocket new_message (emitido por el backend al guardar un mensaje) */
@@ -195,10 +204,11 @@ export async function canSend(conversationId: string): Promise<{
 export async function sendMessage(
   conversationId: string,
   text: string,
+  replyToId?: string,
 ): Promise<{ ok: boolean; message: Message }> {
   return api(`/chat/conversations/${conversationId}/send`, {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, replyToId }),
   });
 }
 
@@ -260,11 +270,24 @@ export interface BroadcastContact {
   isSandboxAuthorized: boolean;
 }
 
+export interface BroadcastTemplateHeader {
+  format: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT';
+  variables: string[];
+}
+
+export interface BroadcastTemplateButton {
+  index: number;
+  type: string;
+  text: string;
+}
+
 export interface BroadcastTemplate {
   id: string;
   name: string;
   body: string;
   variables: string[];
+  header?: BroadcastTemplateHeader;
+  buttons?: BroadcastTemplateButton[];
 }
 
 export type BroadcastMessageType = 'manual' | 'template' | 'ia';
@@ -321,11 +344,33 @@ export async function sendBroadcast(params: {
   text?: string;
   templateId?: string;
   templateVariables?: Record<string, string>;
+  templateAutoNameVariables?: string[];
+  templateHeaderValue?: string;
+  templateButtonVariables?: Record<string, string>;
 }): Promise<{ sent: number; failed: number; errors: Array<{ conversationId: string; error: string }> }> {
   return api('/broadcast/send', {
     method: 'POST',
     body: JSON.stringify(params),
   });
+}
+
+export async function uploadBroadcastTemplateMedia(file: File): Promise<{ url: string }> {
+  const token = getToken();
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE}/broadcast/template-media`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || res.statusText);
+  return data;
 }
 
 // Contactos (sandbox: autorización manual en Meta)
