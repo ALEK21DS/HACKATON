@@ -106,6 +106,12 @@ export class WhatsAppController {
                 status: string;
                 timestamp: string;
                 recipient_id: string;
+                errors?: Array<{
+                  code: number;
+                  title?: string;
+                  message?: string;
+                  error_data?: { details?: string };
+                }>;
               }>;
               metadata?: { phone_number_id?: string };
             }
@@ -123,6 +129,13 @@ export class WhatsAppController {
         if (val.statuses?.length) {
           for (const st of val.statuses) {
             try {
+              if (st.status === 'failed' && st.errors?.length) {
+                this.logger.error(
+                  `Mensaje ${st.id} falló para ${st.recipient_id}: ${st.errors
+                    .map((e) => `[${e.code}] ${e.title || ''} ${e.message || ''} ${e.error_data?.details || ''}`.trim())
+                    .join(' | ')}`,
+                );
+              }
               const msg = await this.prisma.message.findFirst({
                 where: { whatsappMessageId: st.id },
               });
