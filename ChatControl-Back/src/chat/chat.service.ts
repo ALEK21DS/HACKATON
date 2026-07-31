@@ -10,6 +10,7 @@ import { ChatGateway } from './chat.gateway';
 import { LeadAssignmentService } from '../lead-assignment/lead-assignment.service';
 import { StorageService } from '../common/storage.service';
 import { normalizePhone } from '../common/phone.util';
+import { ensureWhatsAppCompatibleVideo, withMp4Extension } from '../common/video-transcode.util';
 import { ConversationsQueryService } from './conversations-query.service';
 
 export interface Message {
@@ -622,14 +623,15 @@ export class ChatService {
   }): Promise<Message> {
     const conv = await this.assertCanSendAndGetConversation(params.organizationId, params.conversationId);
 
-    const timestamp = Date.now();
-    const path = `chats/${params.organizationId}/sent_${timestamp}_${params.file.originalname}`;
-    const mediaUrl = await this.storage.uploadFile(
-      'chat-media',
-      path,
+    const { buffer, mimetype, transcoded } = await ensureWhatsAppCompatibleVideo(
       params.file.buffer,
       params.file.mimetype,
     );
+    const fileName = transcoded ? withMp4Extension(params.file.originalname) : params.file.originalname;
+
+    const timestamp = Date.now();
+    const path = `chats/${params.organizationId}/sent_${timestamp}_${fileName}`;
+    const mediaUrl = await this.storage.uploadFile('chat-media', path, buffer, mimetype);
     if (!mediaUrl) {
       throw new BadRequestException('No se pudo subir el archivo multimedia');
     }
@@ -640,7 +642,7 @@ export class ChatService {
       to: conv.contact.phone,
       mediaUrl,
       type: params.type as any,
-      fileName: params.file.originalname,
+      fileName,
       lastUserMessageAt,
     });
 
@@ -657,8 +659,8 @@ export class ChatService {
         fromAi: false,
         sentByUserId: params.sentByUserId ?? null,
         mediaUrl,
-        mimeType: params.file.mimetype,
-        fileName: params.file.originalname,
+        mimeType: mimetype,
+        fileName,
       },
     });
 

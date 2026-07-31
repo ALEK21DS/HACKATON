@@ -9,6 +9,7 @@ import { SettingsService } from '../settings/settings.service';
 import { TemplatesService } from '../templates/templates.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { StorageService } from '../common/storage.service';
+import { ensureWhatsAppCompatibleVideo, withMp4Extension } from '../common/video-transcode.util';
 
 export type BroadcastMessageType = 'manual' | 'template' | 'ia';
 
@@ -52,9 +53,11 @@ export class BroadcastService {
     organizationId: string,
     file: { originalname: string; buffer: Buffer; mimetype: string },
   ): Promise<string> {
+    const { buffer, mimetype, transcoded } = await ensureWhatsAppCompatibleVideo(file.buffer, file.mimetype);
+    const originalname = transcoded ? withMp4Extension(file.originalname) : file.originalname;
     const timestamp = Date.now();
-    const path = `broadcast/${organizationId}/${timestamp}_${file.originalname}`;
-    const url = await this.storage.uploadFile('chat-media', path, file.buffer, file.mimetype);
+    const path = `broadcast/${organizationId}/${timestamp}_${originalname}`;
+    const url = await this.storage.uploadFile('chat-media', path, buffer, mimetype);
     if (!url) throw new BadRequestException('No se pudo subir el archivo del encabezado');
     return url;
   }
