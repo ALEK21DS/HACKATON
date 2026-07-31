@@ -57,15 +57,26 @@ export async function ensureWhatsAppCompatibleVideo(
 
     logger.log(`Recodificando video de códec "${codec ?? 'desconocido'}" a H.264 para compatibilidad con WhatsApp`);
 
+    const TRANSCODE_TIMEOUT_MS = 120_000;
     await new Promise<void>((resolve, reject) => {
-      ffmpeg(inputPath)
+      const command = ffmpeg(inputPath)
         .videoCodec('libx264')
         .audioCodec('aac')
-        .outputOptions(['-pix_fmt yuv420p', '-movflags +faststart'])
+        // "veryfast" prioriza velocidad sobre tamaño: evita que un video largo
+        // deje la subida colgada; el tamaño sigue acotado por -crf.
+        .outputOptions(['-preset veryfast', '-crf 26', '-pix_fmt yuv420p', '-movflags +faststart'])
         .format('mp4')
         .on('error', reject)
-        .on('end', () => resolve())
-        .save(outputPath);
+        .on('end', () => resolve());
+
+      const timer = setTimeout(() => {
+        command.kill('SIGKILL');
+        reject(new Error(`Recodificación excedió ${TRANSCODE_TIMEOUT_MS / 1000}s`));
+      }, TRANSCODE_TIMEOUT_MS);
+
+      command.save(outputPath);
+      command.on('end', () => clearTimeout(timer));
+      command.on('error', () => clearTimeout(timer));
     });
 
     const transcodedBuffer = await fs.readFile(outputPath);

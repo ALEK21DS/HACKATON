@@ -18,6 +18,7 @@ import {
   getCampaigns,
   importExcelContacts,
   uploadBroadcastTemplateMedia,
+  getBroadcastTemplateMedia,
   type BroadcastListPreview,
   type BroadcastContact,
   type BroadcastTemplate,
@@ -140,6 +141,8 @@ export default function BroadcastPage() {
   const [templateHeaderPreviewUrl, setTemplateHeaderPreviewUrl] = useState('');
   const [templateHeaderUploading, setTemplateHeaderUploading] = useState(false);
   const [templateHeaderUploadError, setTemplateHeaderUploadError] = useState('');
+  const [usingSavedHeader, setUsingSavedHeader] = useState(false);
+  const [loadingSavedHeader, setLoadingSavedHeader] = useState(false);
   const [templateButtonVars, setTemplateButtonVars] = useState<Record<string, string>>({});
   const [instruction, setInstruction] = useState('');
   const [generatedText, setGeneratedText] = useState('');
@@ -368,14 +371,41 @@ export default function BroadcastPage() {
     };
   }, [templateHeaderPreviewUrl]);
 
+  // Al elegir una plantilla con header de imagen/video, reusa el último archivo
+  // subido para esa misma plantilla en vez de pedirlo de nuevo cada vez.
+  useEffect(() => {
+    setTemplateHeaderValue('');
+    setTemplateHeaderFileName('');
+    setTemplateHeaderPreviewUrl('');
+    setTemplateHeaderUploadError('');
+    setUsingSavedHeader(false);
+
+    const template = templates.find(t => t.id === templateId);
+    if (!template?.header || template.header.format === 'TEXT') return;
+
+    setLoadingSavedHeader(true);
+    getBroadcastTemplateMedia(template.id)
+      .then(({ saved }) => {
+        if (!saved) return;
+        setTemplateHeaderValue(saved.mediaUrl);
+        setTemplateHeaderPreviewUrl(saved.mediaUrl);
+        setTemplateHeaderFileName(saved.fileName || 'Archivo guardado');
+        setUsingSavedHeader(true);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingSavedHeader(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId]);
+
   const handleHeaderFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setTemplateHeaderPreviewUrl(URL.createObjectURL(file));
     setTemplateHeaderUploading(true);
     setTemplateHeaderUploadError('');
+    setUsingSavedHeader(false);
     try {
-      const { url } = await uploadBroadcastTemplateMedia(file);
+      const { url } = await uploadBroadcastTemplateMedia(file, selectedTemplate?.id);
       setTemplateHeaderValue(url);
       setTemplateHeaderFileName(file.name);
     } catch (err) {
@@ -1182,9 +1212,12 @@ export default function BroadcastPage() {
                             style={{ maxWidth: '260px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}
                           />
                         )}
+                        {loadingSavedHeader && <p style={{ margin: 0, fontSize: '0.75rem', color: '#999' }}>Buscando archivo guardado...</p>}
                         {templateHeaderUploading && <p style={{ margin: 0, fontSize: '0.75rem', color: '#999' }}>Subiendo archivo...</p>}
                         {!templateHeaderUploading && templateHeaderFileName && (
-                          <p style={{ margin: 0, fontSize: '0.75rem', color: '#22C55E' }}>Archivo listo: {templateHeaderFileName}</p>
+                          <p style={{ margin: 0, fontSize: '0.75rem', color: '#22C55E' }}>
+                            {usingSavedHeader ? `Usando archivo guardado: ${templateHeaderFileName} (subí uno nuevo para reemplazarlo)` : `Archivo listo: ${templateHeaderFileName}`}
+                          </p>
                         )}
                         {templateHeaderUploadError && (
                           <p style={{ margin: 0, fontSize: '0.75rem', color: '#EF4444' }}>{templateHeaderUploadError}</p>

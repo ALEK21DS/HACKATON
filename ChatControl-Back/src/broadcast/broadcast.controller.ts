@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -68,10 +68,20 @@ export class BroadcastController {
 
   @Post('template-media')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 16 * 1024 * 1024 } }))
-  async uploadTemplateMedia(@CurrentUser() user: AuthUser, @UploadedFile() file: any) {
+  async uploadTemplateMedia(
+    @CurrentUser() user: AuthUser,
+    @UploadedFile() file: any,
+    @Body('templateId') templateId?: string,
+  ) {
     if (!file) throw new BadRequestException('Archivo no proveído');
-    const url = await this.broadcast.uploadTemplateHeaderMedia(user.organizationId!, file);
+    const url = await this.broadcast.uploadTemplateHeaderMedia(user.organizationId!, file, templateId);
     return { url };
+  }
+
+  @Get('template-media/:templateId')
+  async getTemplateMedia(@CurrentUser() user: AuthUser, @Param('templateId') templateId: string) {
+    const saved = await this.broadcast.getTemplateHeaderMedia(user.organizationId!, templateId);
+    return { saved };
   }
 
   @Post('generate-message')
