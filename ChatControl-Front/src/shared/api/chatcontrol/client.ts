@@ -354,10 +354,11 @@ export async function sendBroadcast(params: {
   });
 }
 
-export async function uploadBroadcastTemplateMedia(file: File): Promise<{ url: string }> {
+export async function uploadBroadcastTemplateMedia(file: File, templateId?: string): Promise<{ url: string }> {
   const token = getToken();
   const formData = new FormData();
   formData.append('file', file);
+  if (templateId) formData.append('templateId', templateId);
 
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -371,6 +372,16 @@ export async function uploadBroadcastTemplateMedia(file: File): Promise<{ url: s
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || res.statusText);
   return data;
+}
+
+export interface SavedTemplateHeaderMedia {
+  mediaUrl: string;
+  mimeType: string;
+  fileName: string | null;
+}
+
+export async function getBroadcastTemplateMedia(templateId: string): Promise<{ saved: SavedTemplateHeaderMedia | null }> {
+  return api(`/broadcast/template-media/${encodeURIComponent(templateId)}`);
 }
 
 // Contactos (sandbox: autorización manual en Meta)

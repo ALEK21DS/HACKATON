@@ -52,6 +52,7 @@ export class BroadcastService {
   async uploadTemplateHeaderMedia(
     organizationId: string,
     file: { originalname: string; buffer: Buffer; mimetype: string },
+    templateId?: string,
   ): Promise<string> {
     const { buffer, mimetype, transcoded } = await ensureWhatsAppCompatibleVideo(file.buffer, file.mimetype);
     const originalname = transcoded ? withMp4Extension(file.originalname) : file.originalname;
@@ -59,7 +60,28 @@ export class BroadcastService {
     const path = `broadcast/${organizationId}/${timestamp}_${originalname}`;
     const url = await this.storage.uploadFile('chat-media', path, buffer, mimetype);
     if (!url) throw new BadRequestException('No se pudo subir el archivo del encabezado');
+
+    if (templateId) {
+      await this.prisma.templateHeaderMedia.upsert({
+        where: { organizationId_templateId: { organizationId, templateId } },
+        create: { organizationId, templateId, mediaUrl: url, mimeType: mimetype, fileName: originalname },
+        update: { mediaUrl: url, mimeType: mimetype, fileName: originalname },
+      });
+    }
+
     return url;
+  }
+
+  /** Devuelve el último archivo de header guardado para una plantilla, si existe. */
+  async getTemplateHeaderMedia(
+    organizationId: string,
+    templateId: string,
+  ): Promise<{ mediaUrl: string; mimeType: string; fileName: string | null } | null> {
+    const saved = await this.prisma.templateHeaderMedia.findUnique({
+      where: { organizationId_templateId: { organizationId, templateId } },
+    });
+    if (!saved) return null;
+    return { mediaUrl: saved.mediaUrl, mimeType: saved.mimeType, fileName: saved.fileName };
   }
 
   /** Crea conversaciones para contactos que aún no tienen una, en un solo batch (evita N+1). */

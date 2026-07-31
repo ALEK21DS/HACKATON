@@ -24,6 +24,24 @@ model Organization {
   broadcastLists        BroadcastList[]
   crmContactLinks       CrmContactLink[]
   campaigns             Campaign[]
+  templateHeaderMedia   TemplateHeaderMedia[]
+}
+
+/// Recuerda el último archivo de header (imagen/video) subido para cada plantilla de Meta,
+/// para no tener que volver a subirlo en cada envío masivo con esa misma plantilla.
+model TemplateHeaderMedia {
+  id             String       @id @default(cuid())
+  organizationId String
+  templateId     String
+  mediaUrl       String
+  mimeType       String
+  fileName       String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @default(now()) @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, templateId])
+  @@index([organizationId])
 }
 
 /// Credenciales sensibles cifradas (AES-256-GCM). Solo el backend descifra.
