@@ -115,6 +115,7 @@ export interface Conversation {
   phone: string;
   name?: string;
   email?: string | null;
+  tag?: string | null;
   contactId?: string;
   /** Solo pruebas: número autorizado en Meta (sandbox). Si false, no se puede enviar en modo sandbox. */
   isSandboxAuthorized?: boolean;
@@ -390,6 +391,7 @@ export interface ContactItem {
   phone: string;
   name: string | null;
   email?: string | null;
+  tag?: string | null;
   isSandboxAuthorized: boolean;
   createdAt: number;
 }
@@ -427,6 +429,7 @@ export async function createContact(params: {
   phone: string;
   name?: string;
   email?: string;
+  tag?: string;
   isSandboxAuthorized?: boolean;
 }): Promise<{ ok: boolean; contact: ContactItem }> {
   return api('/contacts', {
@@ -437,7 +440,7 @@ export async function createContact(params: {
 
 export async function updateContact(
   id: string,
-  params: { name?: string; email?: string; isSandboxAuthorized?: boolean },
+  params: { name?: string; email?: string; tag?: string; isSandboxAuthorized?: boolean },
 ): Promise<{ ok: boolean; contact: ContactItem }> {
   return api(`/contacts/${id}`, {
     method: 'PATCH',

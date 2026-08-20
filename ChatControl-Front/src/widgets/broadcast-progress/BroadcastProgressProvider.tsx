@@ -13,6 +13,19 @@ interface BroadcastProgress {
   failedCount: number;
 }
 
+interface FailureItem {
+  conversationId: string;
+  phone: string;
+  name: string | null;
+  detail: string;
+}
+
+interface CategoryBucket {
+  label: string;
+  count: number;
+  items: FailureItem[];
+}
+
 interface SendBroadcastParams {
   conversationIds: string[];
   type: BroadcastMessageType;
@@ -54,6 +67,8 @@ export function BroadcastProgressProvider({ children }: { children: React.ReactN
   const [sendError, setSendError] = useState('');
   const [sendResultMessage, setSendResultMessage] = useState('');
   const [broadcastProgress, setBroadcastProgress] = useState<BroadcastProgress | null>(null);
+  const [failuresByCategory, setFailuresByCategory] = useState<Map<string, CategoryBucket>>(new Map());
+  const [openCategory, setOpenCategory] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
@@ -73,9 +88,33 @@ export function BroadcastProgressProvider({ children }: { children: React.ReactN
     socket.on('broadcast_message_failed', () => {
       setBroadcastProgress(prev => prev ? { ...prev, failedCount: prev.failedCount + 1 } : prev);
     });
+    socket.on('message_delivery_failed', (p: {
+      conversationId: string; contactPhone: string; contactName: string | null;
+      category: string; label: string; detail: string;
+    }) => {
+      setFailuresByCategory(prev => {
+        const next = new Map(prev);
+        const existing = next.get(p.category);
+        const item: FailureItem = { conversationId: p.conversationId, phone: p.contactPhone, name: p.contactName, detail: p.detail };
+        if (existing) {
+          next.set(p.category, { ...existing, count: existing.count + 1, items: [...existing.items, item] });
+        } else {
+          next.set(p.category, { label: p.label, count: 1, items: [item] });
+        }
+        return next;
+      });
+    });
 
     return () => { socket.disconnect(); };
   }, [mounted]);
+
+  const dismissCategory = useCallback((category: string) => {
+    setFailuresByCategory(prev => {
+      const next = new Map(prev);
+      next.delete(category);
+      return next;
+    });
+  }, []);
 
   const clearBroadcastResult = useCallback(() => {
     setSendError('');
@@ -104,6 +143,20 @@ export function BroadcastProgressProvider({ children }: { children: React.ReactN
       setTimeout(() => setBroadcastProgress(null), 4000);
     }
   }, []);
+
+  // Apilado vertical manual: card de progreso -> toast de resultado -> un toast por categoría de fallo.
+  const categoryEntries = Array.from(failuresByCategory.entries());
+  let stackOffset = 1.5;
+  if (broadcastProgress) stackOffset += 8;
+  const resultToastVisible = !!(sendError || sendResultMessage);
+  const resultToastTop = stackOffset;
+  if (resultToastVisible) stackOffset += 5.5;
+  const categoryTops = categoryEntries.map(([key]) => {
+    const top = stackOffset;
+    stackOffset += 5.5;
+    return [key, top] as const;
+  });
+  const openBucket = openCategory ? failuresByCategory.get(openCategory) ?? null : null;
 
   return (
     <BroadcastProgressContext.Provider
@@ -153,10 +206,10 @@ export function BroadcastProgressProvider({ children }: { children: React.ReactN
         </div>
       )}
 
-      {(sendError || sendResultMessage) && (
+      {resultToastVisible && (
         <div style={{
           position: 'fixed',
-          top: broadcastProgress ? '9.5rem' : '1.5rem',
+          top: `${resultToastTop}rem`,
           right: '1.5rem',
           zIndex: 9999,
           maxWidth: '320px',
@@ -179,6 +232,107 @@ export function BroadcastProgressProvider({ children }: { children: React.ReactN
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {categoryTops.map(([category, top]) => {
+        const bucket = failuresByCategory.get(category);
+        if (!bucket) return null;
+        return (
+          <div key={category} style={{
+            position: 'fixed',
+            top: `${top}rem`,
+            right: '1.5rem',
+            zIndex: 9999,
+            maxWidth: '320px',
+            background: 'rgba(239,68,68,0.12)',
+            border: '1px solid rgba(239,68,68,0.35)',
+            borderRadius: '14px',
+            padding: '0.9rem 1.1rem',
+            color: '#EF4444',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.5rem',
+            animation: 'fadeIn 0.2s ease-out',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem' }}>
+              <span style={{ flex: 1 }}>
+                {bucket.count} contacto{bucket.count === 1 ? '' : 's'} — {bucket.label}
+              </span>
+              <button
+                onClick={() => dismissCategory(category)}
+                style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '0.9rem', opacity: 0.7, flexShrink: 0 }}
+              >
+                ✕
+              </button>
+            </div>
+            <button
+              onClick={() => setOpenCategory(category)}
+              style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: '#F59E0B', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer', padding: 0 }}
+            >
+              Ver detalles
+            </button>
+          </div>
+        );
+      })}
+
+      {openBucket && (
+        <div
+          onClick={() => setOpenCategory(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10000,
+            background: 'rgba(0,0,0,0.85)',
+            backdropFilter: 'blur(10px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.5rem',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#0d0d0d',
+              border: '1px solid rgba(239,68,68,0.25)',
+              borderRadius: '16px',
+              padding: '1.5rem',
+              width: '100%',
+              maxWidth: '420px',
+              maxHeight: '70vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+              animation: 'fadeIn 0.2s ease-out',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#F2F2F2' }}>{openBucket.label}</span>
+              <button
+                onClick={() => setOpenCategory(null)}
+                style={{ background: 'none', border: 'none', color: '#8C8C8C', cursor: 'pointer', fontSize: '1rem' }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {openBucket.items.map((item, i) => (
+                <div key={`${item.conversationId}-${i}`} style={{
+                  padding: '0.6rem 0.75rem',
+                  borderRadius: '10px',
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#F2F2F2' }}>{item.name || 'Sin nombre'}</div>
+                  <div style={{ fontSize: '0.75rem', color: '#8C8C8C' }}>{item.phone}</div>
+                  <div style={{ fontSize: '0.7rem', color: '#666', marginTop: '0.2rem' }}>{item.detail}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </BroadcastProgressContext.Provider>

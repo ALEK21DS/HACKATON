@@ -147,6 +147,7 @@ export default function ChatPage() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
+  const [editTag, setEditTag] = useState('');
   const [editSandbox, setEditSandbox] = useState(false);
   const [isSandbox, setIsSandbox] = useState(true);
   const [updatingContact, setUpdatingContact] = useState(false);
@@ -499,6 +500,7 @@ export default function ChatPage() {
     if (selectedConv) {
       setEditName(selectedConv.name || '');
       setEditEmail(selectedConv.email || '');
+      setEditTag(selectedConv.tag || '');
       setEditSandbox(selectedConv.isSandboxAuthorized || false);
     }
   }, [selectedConv]);
@@ -538,6 +540,7 @@ export default function ChatPage() {
       await updateContact(selectedConv.contactId, {
         name: editName.trim() || undefined,
         email: editEmail.trim() || undefined,
+        tag: editTag.trim() || undefined,
         isSandboxAuthorized: editSandbox,
       });
       await loadConversations(false);
@@ -1041,6 +1044,11 @@ export default function ChatPage() {
                   {selectedConv.email}
                 </span>
               )}
+              {selectedConv.tag && (
+                <span style={{ fontSize: '0.75rem', color: '#8C8C8C', fontWeight: 500, display: 'block' }}>
+                  {selectedConv.tag}
+                </span>
+              )}
             </div>
           </div>
 
@@ -1050,8 +1058,8 @@ export default function ChatPage() {
               <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 Nombre
               </label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 placeholder="Nombre del contacto"
@@ -1063,11 +1071,24 @@ export default function ChatPage() {
               <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 Email
               </label>
-              <input 
-                type="email" 
+              <input
+                type="email"
                 value={editEmail}
                 onChange={(e) => setEditEmail(e.target.value)}
                 placeholder="Email del contacto"
+                style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', padding: '0.75rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Etiqueta
+              </label>
+              <input
+                type="text"
+                value={editTag}
+                onChange={(e) => setEditTag(e.target.value)}
+                placeholder="Etiqueta del contacto"
                 style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', padding: '0.75rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
               />
             </div>

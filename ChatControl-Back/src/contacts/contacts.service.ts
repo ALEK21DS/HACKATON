@@ -6,6 +6,7 @@ export interface ContactDto {
   phone: string;
   name: string | null;
   email: string | null;
+  tag: string | null;
   isSandboxAuthorized: boolean;
   createdAt: number;
 }
@@ -79,6 +80,7 @@ export class ContactsService {
         phone: c.phone,
         name: c.name,
         email: c.email,
+        tag: c.tag,
         isSandboxAuthorized: c.isSandboxAuthorized,
         createdAt: c.createdAt.getTime(),
       })),
@@ -99,6 +101,7 @@ export class ContactsService {
       phone: string;
       name?: string;
       email?: string;
+      tag?: string;
       isSandboxAuthorized?: boolean;
     },
   ): Promise<ContactDto> {
@@ -113,11 +116,13 @@ export class ContactsService {
         phone,
         name: params.name?.trim() || null,
         email: params.email?.trim() || null,
+        tag: params.tag?.trim() || null,
         isSandboxAuthorized: params.isSandboxAuthorized ?? false,
       },
       update: {
         name: params.name !== undefined ? params.name?.trim() || null : undefined,
         email: params.email !== undefined ? params.email?.trim() || null : undefined,
+        tag: params.tag !== undefined ? params.tag?.trim() || null : undefined,
         isSandboxAuthorized: params.isSandboxAuthorized ?? undefined,
       },
     });
@@ -134,6 +139,7 @@ export class ContactsService {
       phone: contact.phone,
       name: contact.name,
       email: contact.email,
+      tag: contact.tag,
       isSandboxAuthorized: contact.isSandboxAuthorized,
       createdAt: contact.createdAt.getTime(),
     };
@@ -142,7 +148,7 @@ export class ContactsService {
   async update(
     organizationId: string,
     id: string,
-    params: { name?: string; email?: string; isSandboxAuthorized?: boolean },
+    params: { name?: string; email?: string; tag?: string; isSandboxAuthorized?: boolean },
   ): Promise<ContactDto> {
     const existing = await this.prisma.contact.findFirst({
       where: { id, organizationId },
@@ -153,6 +159,7 @@ export class ContactsService {
       data: {
         name: params.name !== undefined ? params.name?.trim() || null : undefined,
         email: params.email !== undefined ? params.email?.trim() || null : undefined,
+        tag: params.tag !== undefined ? params.tag?.trim() || null : undefined,
         isSandboxAuthorized: params.isSandboxAuthorized ?? undefined,
       },
     });
@@ -161,6 +168,7 @@ export class ContactsService {
       phone: contact.phone,
       name: contact.name,
       email: contact.email,
+      tag: contact.tag,
       isSandboxAuthorized: contact.isSandboxAuthorized,
       createdAt: contact.createdAt.getTime(),
     };
@@ -182,6 +190,7 @@ export class ContactsService {
       phone: contact.phone,
       name: contact.name,
       email: contact.email,
+      tag: contact.tag,
       isSandboxAuthorized: contact.isSandboxAuthorized,
       createdAt: contact.createdAt.getTime(),
     };

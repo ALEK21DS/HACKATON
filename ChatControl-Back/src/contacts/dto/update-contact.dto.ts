@@ -9,6 +9,10 @@ export class UpdateContactDto {
   @IsOptional()
   email?: string;
 
+  @IsString()
+  @IsOptional()
+  tag?: string;
+
   /** Solo pruebas: número autorizado en Meta (sandbox). TODO: eliminar en producción. */
   @IsBoolean()
   @IsOptional()

@@ -10,6 +10,7 @@ import { TemplatesService } from '../templates/templates.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { StorageService } from '../common/storage.service';
 import { ensureWhatsAppCompatibleVideo, withMp4Extension } from '../common/video-transcode.util';
+import { classifyWhatsAppFailure } from '../common/whatsapp-error-catalog.util';
 
 export type BroadcastMessageType = 'manual' | 'template' | 'ia';
 
@@ -304,6 +305,7 @@ export class BroadcastService {
           i,
           'Número no autorizado en Meta (sandbox)',
         );
+        this.emitCategorizedFailure(organizationId, conversationId, contact, 'Número no autorizado en Meta (sandbox)');
         failed++;
         errors.push({ conversationId, error: 'Número no autorizado en Meta (sandbox)' });
         continue;
@@ -313,6 +315,7 @@ export class BroadcastService {
         if (!contact.canSend) {
           await this.logBroadcast(organizationId, userId, conversationId, type, 'failed', 'Fuera de ventana de 24 horas');
           this.gateway.emitBroadcastMessageFailed(organizationId, conversationId, i, 'Fuera de ventana de 24 horas');
+          this.emitCategorizedFailure(organizationId, conversationId, contact, 'Fuera de ventana de 24 horas');
           failed++;
           errors.push({ conversationId, error: 'Fuera de ventana de 24 horas' });
           continue;
@@ -374,12 +377,31 @@ export class BroadcastService {
         const errorMessage = err instanceof Error ? err.message : String(err);
         await this.logBroadcast(organizationId, userId, conversationId, type, 'failed', errorMessage);
         this.gateway.emitBroadcastMessageFailed(organizationId, conversationId, i, errorMessage);
+        this.emitCategorizedFailure(organizationId, conversationId, contact, errorMessage);
         failed++;
         errors.push({ conversationId, error: errorMessage });
       }
     }
 
     return { sent, failed, errors };
+  }
+
+  /** Alimenta el sistema global de toasts por categoría (BroadcastProgressProvider en el frontend). */
+  private emitCategorizedFailure(
+    organizationId: string,
+    conversationId: string,
+    contact: { phone: string; name?: string },
+    detail: string,
+  ): void {
+    const { category, label } = classifyWhatsAppFailure({ message: detail });
+    this.gateway.emitMessageDeliveryFailed(organizationId, {
+      conversationId,
+      contactPhone: contact.phone,
+      contactName: contact.name ?? null,
+      category,
+      label,
+      detail,
+    });
   }
 
   private parseMetaTemplateId(id: string): { name: string; language: string } | null {
