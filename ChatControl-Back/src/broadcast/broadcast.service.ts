@@ -10,8 +10,20 @@ import { TemplatesService } from '../templates/templates.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { StorageService } from '../common/storage.service';
 import { ensureWhatsAppCompatibleVideo, withMp4Extension } from '../common/video-transcode.util';
+import { classifyWhatsAppFailure } from '../common/whatsapp-error-catalog.util';
 
 export type BroadcastMessageType = 'manual' | 'template' | 'ia';
+
+const SEND_DELAY_MS = 350;
+const CIRCUIT_BREAKER_CHECK_INTERVAL_MS = 5_000;
+const CIRCUIT_BREAKER_WINDOW_MS = 3 * 60 * 1000;
+const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 8;
+const CIRCUIT_BREAKER_REASON =
+  'Envío masivo detenido automáticamente: WhatsApp está rechazando mensajes por límite de spam. Los contactos restantes no fueron procesados.';
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export interface BroadcastContact {
   id: string;
@@ -284,6 +296,18 @@ export class BroadcastService {
     }
 
     const contactMap = new Map(contacts.map((c) => [c.id, c]));
+
+    // Trae el tier de mensajería real de Meta antes de un envío masivo: el valor cacheado en BD
+    // solo se actualiza cuando alguien sincroniza manualmente y puede quedar desactualizado,
+    // dejando pasar envíos que Meta ya no permite (ver checkDailyLimitOrThrow más abajo).
+    if (validIds.length > 1) {
+      try {
+        await this.whatsapp.syncMessagingLimit(organizationId);
+      } catch {
+        // No bloquea el envío si Meta no responde; se sigue usando el tier cacheado.
+      }
+    }
+
     this.gateway.emitBroadcastStarted(organizationId, validIds.length);
 
     let sent = 0;
@@ -292,9 +316,29 @@ export class BroadcastService {
 
     const isSandbox = this.config.get<string>('WHATSAPP_SANDBOX', 'true') === 'true';
 
+    let circuitOpen = false;
+    let lastCircuitCheckAt = 0;
+
     for (let i = 0; i < validIds.length; i++) {
       const conversationId = validIds[i];
       const contact = contactMap.get(conversationId)!;
+
+      if (!circuitOpen && Date.now() - lastCircuitCheckAt > CIRCUIT_BREAKER_CHECK_INTERVAL_MS) {
+        lastCircuitCheckAt = Date.now();
+        const recentFailures = await this.recentSpamFailureCount(organizationId);
+        if (recentFailures >= CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
+          circuitOpen = true;
+        }
+      }
+
+      if (circuitOpen) {
+        await this.logBroadcast(organizationId, userId, conversationId, type, 'failed', CIRCUIT_BREAKER_REASON);
+        this.gateway.emitBroadcastMessageFailed(organizationId, conversationId, i, CIRCUIT_BREAKER_REASON);
+        this.emitCategorizedFailure(organizationId, conversationId, contact, CIRCUIT_BREAKER_REASON);
+        failed++;
+        errors.push({ conversationId, error: CIRCUIT_BREAKER_REASON });
+        continue;
+      }
 
       if (isSandbox && !contact.isSandboxAuthorized) {
         await this.logBroadcast(organizationId, userId, conversationId, type, 'failed', 'Número no autorizado en Meta (sandbox)');
@@ -304,6 +348,7 @@ export class BroadcastService {
           i,
           'Número no autorizado en Meta (sandbox)',
         );
+        this.emitCategorizedFailure(organizationId, conversationId, contact, 'Número no autorizado en Meta (sandbox)');
         failed++;
         errors.push({ conversationId, error: 'Número no autorizado en Meta (sandbox)' });
         continue;
@@ -313,6 +358,7 @@ export class BroadcastService {
         if (!contact.canSend) {
           await this.logBroadcast(organizationId, userId, conversationId, type, 'failed', 'Fuera de ventana de 24 horas');
           this.gateway.emitBroadcastMessageFailed(organizationId, conversationId, i, 'Fuera de ventana de 24 horas');
+          this.emitCategorizedFailure(organizationId, conversationId, contact, 'Fuera de ventana de 24 horas');
           failed++;
           errors.push({ conversationId, error: 'Fuera de ventana de 24 horas' });
           continue;
@@ -374,12 +420,49 @@ export class BroadcastService {
         const errorMessage = err instanceof Error ? err.message : String(err);
         await this.logBroadcast(organizationId, userId, conversationId, type, 'failed', errorMessage);
         this.gateway.emitBroadcastMessageFailed(organizationId, conversationId, i, errorMessage);
+        this.emitCategorizedFailure(organizationId, conversationId, contact, errorMessage);
         failed++;
         errors.push({ conversationId, error: errorMessage });
+      }
+
+      if (i < validIds.length - 1) {
+        await sleep(SEND_DELAY_MS);
       }
     }
 
     return { sent, failed, errors };
+  }
+
+  /** Cuenta mensajes salientes marcados como FAILED (vía webhook de estado) en la ventana reciente,
+   * para frenar un envío masivo si Meta ya está rechazando por spam antes de quemar el resto de la lista. */
+  private async recentSpamFailureCount(organizationId: string): Promise<number> {
+    const since = new Date(Date.now() - CIRCUIT_BREAKER_WINDOW_MS);
+    return this.prisma.message.count({
+      where: {
+        direction: MessageDirection.OUT,
+        status: MessageStatus.FAILED,
+        whatsappTimestamp: { gte: since },
+        conversation: { contact: { organizationId } },
+      },
+    });
+  }
+
+  /** Alimenta el sistema global de toasts por categoría (BroadcastProgressProvider en el frontend). */
+  private emitCategorizedFailure(
+    organizationId: string,
+    conversationId: string,
+    contact: { phone: string; name?: string },
+    detail: string,
+  ): void {
+    const { category, label } = classifyWhatsAppFailure({ message: detail });
+    this.gateway.emitMessageDeliveryFailed(organizationId, {
+      conversationId,
+      contactPhone: contact.phone,
+      contactName: contact.name ?? null,
+      category,
+      label,
+      detail,
+    });
   }
 
   private parseMetaTemplateId(id: string): { name: string; language: string } | null {

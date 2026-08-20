@@ -74,11 +74,8 @@ export default function SettingsPage() {
     try {
       const res = await syncWhatsappLimit();
       setWhatsappTier(res.whatsappTier);
-      setSettings(prev => prev ? {
-        ...prev,
-        whatsappTier: res.whatsappTier,
-        dailyLimit: res.dailyLimit
-      } : null);
+      const fresh = await getSettings();
+      setSettings(fresh);
       setSuccess(`Límites sincronizados correctamente desde Meta. Nivel: ${TIER_LABELS[res.whatsappTier]}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al sincronizar con Meta');
@@ -237,6 +234,12 @@ export default function SettingsPage() {
                   <span style={{ fontSize: '0.8rem', color: '#EF4444', fontWeight: 700 }}>
                     Capacidad actual: {settings.dailyLimit == null ? 'ILIMITADO' : `${settings.dailyLimit.toLocaleString()} mensajes / día`}
                   </span>
+                  {settings.dailyLimit != null && (
+                    <div style={{ marginTop: '0.4rem', fontSize: '0.78rem', color: '#8C8C8C', fontWeight: 600 }}>
+                      Usados hoy: <strong style={{ color: '#F2F2F2' }}>{settings.dailyUsed.toLocaleString()}</strong> / {settings.dailyLimit.toLocaleString()}
+                      {' · '}Disponibles: <strong style={{ color: (settings.dailyRemaining ?? 0) > 0 ? '#4ADE80' : '#EF4444' }}>{(settings.dailyRemaining ?? 0).toLocaleString()}</strong>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

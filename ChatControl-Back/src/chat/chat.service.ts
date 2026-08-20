@@ -41,6 +41,7 @@ export interface Conversation {
   phone: string;
   name?: string;
   email?: string | null;
+  tag?: string | null;
   contactId?: string;
   isSandboxAuthorized?: boolean;
   lastUserMessageAt: number | null;
@@ -704,6 +705,20 @@ export class ChatService {
 
   emitMessageStatusUpdate(organizationId: string, conversationId: string, messageId: string, status: string): void {
     this.chatGateway.emitMessageStatusUpdate(organizationId, conversationId, messageId, status);
+  }
+
+  emitMessageDeliveryFailed(
+    organizationId: string,
+    payload: {
+      conversationId: string;
+      contactPhone: string;
+      contactName: string | null;
+      category: string;
+      label: string;
+      detail: string;
+    },
+  ): void {
+    this.chatGateway.emitMessageDeliveryFailed(organizationId, payload);
   }
 
   async assignConversation(

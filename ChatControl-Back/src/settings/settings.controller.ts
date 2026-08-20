@@ -15,15 +15,19 @@ export class SettingsController {
   constructor(private readonly settings: SettingsService) {}
 
   private async buildResponse(organizationId: string) {
-    const [whatsappTier, dailyLimit, geminiModel, geminiModelInUse] = await Promise.all([
+    const [whatsappTier, dailyLimit, dailyUsed, geminiModel, geminiModelInUse] = await Promise.all([
       this.settings.getWhatsappTier(organizationId),
       this.settings.getDailyLimit(organizationId),
+      this.settings.getDailyConversationCount(organizationId),
       this.settings.getGeminiModel(organizationId),
       this.settings.getGeminiModelInUse(organizationId),
     ]);
+    const isUnlimited = dailyLimit === Number.MAX_SAFE_INTEGER;
     return {
       whatsappTier,
-      dailyLimit: dailyLimit === Number.MAX_SAFE_INTEGER ? null : dailyLimit,
+      dailyLimit: isUnlimited ? null : dailyLimit,
+      dailyUsed,
+      dailyRemaining: isUnlimited ? null : Math.max(0, dailyLimit - dailyUsed),
       geminiModel,
       geminiModelInUse,
     };

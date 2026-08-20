@@ -17,6 +17,7 @@ import {
   importExcelContacts,
   uploadBroadcastTemplateMedia,
   getBroadcastTemplateMedia,
+  getSettings,
   type BroadcastListPreview,
   type BroadcastContact,
   type BroadcastTemplate,
@@ -24,6 +25,7 @@ import {
   type BroadcastListItem,
   type Campaign,
   type ImportExcelContactsResult,
+  type SettingsData,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
@@ -129,6 +131,7 @@ export default function BroadcastPage() {
   const [excelImportResult, setExcelImportResult] = useState<ImportExcelContactsResult | null>(null);
   const [excelError, setExcelError] = useState('');
   const excelFileInputRef = useRef<HTMLInputElement>(null);
+  const [dailyUsage, setDailyUsage] = useState<SettingsData | null>(null);
   const [text, setText] = useState('');
   const [templateId, setTemplateId] = useState('');
   const [templateVars, setTemplateVars] = useState<Record<string, string>>({});
@@ -199,6 +202,7 @@ export default function BroadcastPage() {
         setTemplates(tl);
         setCampaigns(campaignsData);
         await loadCrmLists();
+        getSettings().then(setDailyUsage).catch(() => {});
 
         if (campaignsData.length > 0) {
           const allIds = campaignsData.map(c => c.id);
@@ -508,6 +512,12 @@ export default function BroadcastPage() {
 
   const handleConfirmExcelImport = async () => {
     if (!excelPreviewRows.length || excelImporting) return;
+    if (dailyRemaining != null && excelPreviewRows.length > dailyRemaining) {
+      setExcelError(
+        `Tu archivo tiene ${excelPreviewRows.length} contactos pero hoy solo puedes enviar a ${dailyRemaining} más (ya usaste ${dailyUsage?.dailyUsed ?? 0}/${dailyUsage?.dailyLimit ?? 0} del límite de WhatsApp). Reduce el archivo o repártelo en varios días.`,
+      );
+      return;
+    }
     setExcelImporting(true);
     setExcelError('');
     try {
@@ -520,6 +530,10 @@ export default function BroadcastPage() {
       setExcelImporting(false);
     }
   };
+
+  const dailyRemaining = dailyUsage?.dailyRemaining ?? null; // null = ilimitado
+  const excelExceedsCapacity =
+    dailyRemaining != null && excelPreviewRows.length > 0 && excelPreviewRows.length > dailyRemaining;
 
   const forceMetaTemplate = contactSource === 'excel_import' && (excelImportResult?.outOfWindowCount ?? 0) > 0;
 
@@ -650,6 +664,20 @@ export default function BroadcastPage() {
               <div style={{ fontSize: '0.65rem', color: '#666', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>
                 Excel con columnas &quot;nombre&quot; y &quot;numero&quot;
               </div>
+              {dailyRemaining != null && (
+                <div style={{
+                  marginBottom: 8,
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 8,
+                  background: excelExceedsCapacity ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.02)',
+                  border: `1px solid ${excelExceedsCapacity ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.05)'}`,
+                  fontSize: '0.72rem',
+                  color: excelExceedsCapacity ? '#EF4444' : '#8C8C8C',
+                  fontWeight: 700,
+                }}>
+                  Capacidad de hoy: {dailyUsage?.dailyUsed ?? 0}/{dailyUsage?.dailyLimit ?? 0} usados · {dailyRemaining} disponibles
+                </div>
+              )}
               <button
                 type="button"
                 onClick={handleDownloadExcelTemplate}
@@ -697,15 +725,20 @@ export default function BroadcastPage() {
                       </div>
                     ))}
                   </div>
+                  {!excelImportResult && excelExceedsCapacity && (
+                    <p style={{ margin: '0 0 10px', fontSize: '0.7rem', color: '#EF4444', fontWeight: 700 }}>
+                      Este archivo tiene {excelPreviewRows.length} contactos pero hoy solo puedes enviarle a {dailyRemaining}. Reduce el archivo o repártelo en varios días para no ser bloqueado por WhatsApp.
+                    </p>
+                  )}
                   {!excelImportResult && (
                     <button
                       type="button"
                       onClick={handleConfirmExcelImport}
-                      disabled={excelImporting}
-                      style={{ width: '100%', padding: '0.65rem', background: '#EF4444', border: 'none', borderRadius: 10, color: 'white', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', cursor: excelImporting ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                      disabled={excelImporting || excelExceedsCapacity}
+                      style={{ width: '100%', padding: '0.65rem', background: excelExceedsCapacity ? 'rgba(239,68,68,0.3)' : '#EF4444', border: 'none', borderRadius: 10, color: 'white', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', cursor: (excelImporting || excelExceedsCapacity) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                     >
                       {excelImporting && <Spinner size={14} />}
-                      {excelImporting ? 'Importando...' : 'Confirmar importación'}
+                      {excelImporting ? 'Importando...' : excelExceedsCapacity ? 'Límite diario superado' : 'Confirmar importación'}
                     </button>
                   )}
                 </div>

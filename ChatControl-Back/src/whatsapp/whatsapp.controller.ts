@@ -18,6 +18,7 @@ import { Response } from 'express';
 import { WhatsAppService } from './whatsapp.service';
 import { ChatService } from '../chat/chat.service';
 import { StorageService } from '../common/storage.service';
+import { classifyWhatsAppFailure } from '../common/whatsapp-error-catalog.util';
 import { MessageType, MessageStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { extname } from 'path';
@@ -129,22 +130,35 @@ export class WhatsAppController {
         if (val.statuses?.length) {
           for (const st of val.statuses) {
             try {
-              if (st.status === 'failed' && st.errors?.length) {
+              const failureInfo = st.status === 'failed' && st.errors?.length ? st.errors[0] : null;
+              if (failureInfo) {
                 this.logger.error(
-                  `Mensaje ${st.id} falló para ${st.recipient_id}: ${st.errors
+                  `Mensaje ${st.id} falló para ${st.recipient_id}: ${st.errors!
                     .map((e) => `[${e.code}] ${e.title || ''} ${e.message || ''} ${e.error_data?.details || ''}`.trim())
                     .join(' | ')}`,
                 );
               }
+
               const msg = await this.prisma.message.findFirst({
                 where: { whatsappMessageId: st.id },
+                include: { conversation: { include: { contact: true } } },
               });
+
               if (msg) {
                 const newStatus = this.mapWhatsappStatus(st.status);
                 if (newStatus) {
+                  const classification = failureInfo
+                    ? classifyWhatsAppFailure({ code: failureInfo.code, message: failureInfo.message })
+                    : null;
+
                   await this.prisma.message.update({
                     where: { id: msg.id },
-                    data: { status: newStatus },
+                    data: {
+                      status: newStatus,
+                      ...(classification
+                        ? { errorCategory: classification.category, errorDetail: failureInfo!.message || failureInfo!.title || '' }
+                        : {}),
+                    },
                   });
                   this.chat.emitMessageStatusUpdate(
                     organizationId,
@@ -152,6 +166,17 @@ export class WhatsAppController {
                     msg.id,
                     newStatus,
                   );
+
+                  if (classification) {
+                    this.chat.emitMessageDeliveryFailed(organizationId, {
+                      conversationId: msg.conversationId,
+                      contactPhone: msg.conversation.contact.phone,
+                      contactName: msg.conversation.contact.name,
+                      category: classification.category,
+                      label: classification.label,
+                      detail: failureInfo!.message || failureInfo!.title || 'Error desconocido',
+                    });
+                  }
                 }
               }
             } catch (err) {

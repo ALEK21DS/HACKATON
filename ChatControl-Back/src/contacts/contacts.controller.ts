@@ -59,6 +59,8 @@ export class ContactsController {
     const contact = await this.contacts.createOrUpdate(user.organizationId!, {
       phone: dto.phone,
       name: dto.name,
+      email: dto.email,
+      tag: dto.tag,
       isSandboxAuthorized: dto.isSandboxAuthorized ?? false,
     });
     return { ok: true, contact };
@@ -68,6 +70,8 @@ export class ContactsController {
   async update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateContactDto) {
     const contact = await this.contacts.update(user.organizationId!, id, {
       name: dto.name,
+      email: dto.email,
+      tag: dto.tag,
       isSandboxAuthorized: dto.isSandboxAuthorized,
     });
     return { ok: true, contact };

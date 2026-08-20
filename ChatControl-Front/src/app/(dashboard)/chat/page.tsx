@@ -147,6 +147,7 @@ export default function ChatPage() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
+  const [editTag, setEditTag] = useState('');
   const [editSandbox, setEditSandbox] = useState(false);
   const [isSandbox, setIsSandbox] = useState(true);
   const [updatingContact, setUpdatingContact] = useState(false);
@@ -499,6 +500,7 @@ export default function ChatPage() {
     if (selectedConv) {
       setEditName(selectedConv.name || '');
       setEditEmail(selectedConv.email || '');
+      setEditTag(selectedConv.tag || '');
       setEditSandbox(selectedConv.isSandboxAuthorized || false);
     }
   }, [selectedConv]);
@@ -538,6 +540,7 @@ export default function ChatPage() {
       await updateContact(selectedConv.contactId, {
         name: editName.trim() || undefined,
         email: editEmail.trim() || undefined,
+        tag: editTag.trim() || undefined,
         isSandboxAuthorized: editSandbox,
       });
       await loadConversations(false);
@@ -647,7 +650,7 @@ export default function ChatPage() {
       </aside>
 
       {/* ── Main: Área de Conversación ── */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#040404', position: 'relative' }}>
+      <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#040404', position: 'relative' }}>
         {selectedId ? (
           <>
             {/* Header del Chat */}
@@ -999,18 +1002,21 @@ export default function ChatPage() {
 
       {/* ── Sidebar: Detalles de Contacto ── */}
       {detailsOpen && selectedConv && (
-        <aside style={{
-          width: '340px',
-          minWidth: '300px',
-          background: '#0d0d0d',
-          borderLeft: '1px solid rgba(255,255,255,0.05)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflowY: 'auto',
-          zIndex: 15,
-          padding: '1.5rem',
-          animation: 'slideInRight 0.3s ease-out',
-        }} className="custom-scrollbar" onScroll={handleDetailsScroll}>
+        <>
+          <div className={styles.detailsBackdrop} onClick={() => setDetailsOpen(false)} />
+          <aside className={`${styles.detailsSidebar} custom-scrollbar`} style={{
+            width: '340px',
+            minWidth: '300px',
+            flexShrink: 0,
+            background: '#0d0d0d',
+            borderLeft: '1px solid rgba(255,255,255,0.05)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflowY: 'auto',
+            zIndex: 15,
+            padding: '1.5rem',
+            animation: 'slideInRight 0.3s ease-out',
+          }} onScroll={handleDetailsScroll}>
           {/* Cabecera */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, color: '#EF4444' }}>
@@ -1041,6 +1047,11 @@ export default function ChatPage() {
                   {selectedConv.email}
                 </span>
               )}
+              {selectedConv.tag && (
+                <span style={{ fontSize: '0.75rem', color: '#8C8C8C', fontWeight: 500, display: 'block' }}>
+                  {selectedConv.tag}
+                </span>
+              )}
             </div>
           </div>
 
@@ -1050,8 +1061,8 @@ export default function ChatPage() {
               <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 Nombre
               </label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 placeholder="Nombre del contacto"
@@ -1063,11 +1074,24 @@ export default function ChatPage() {
               <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 Email
               </label>
-              <input 
-                type="email" 
+              <input
+                type="email"
                 value={editEmail}
                 onChange={(e) => setEditEmail(e.target.value)}
                 placeholder="Email del contacto"
+                style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', padding: '0.75rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Etiqueta
+              </label>
+              <input
+                type="text"
+                value={editTag}
+                onChange={(e) => setEditTag(e.target.value)}
+                placeholder="Etiqueta del contacto"
                 style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', padding: '0.75rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
               />
             </div>
@@ -1165,6 +1189,7 @@ export default function ChatPage() {
             )}
           </div>
         </aside>
+        </>
       )}
 
       {/* Lightbox / Fullscreen Image Preview */}
