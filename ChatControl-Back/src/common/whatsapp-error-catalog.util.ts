@@ -12,6 +12,7 @@ interface FailureClassification {
 }
 
 const CODE_CATEGORY_MAP: Record<number, FailureClassification> = {
+  131048: { category: 'SPAM_BLOCKED', label: 'Rechazados por límite de spam' },
   131049: { category: 'SPAM_BLOCKED', label: 'Rechazados para evitar spam' },
   131026: { category: 'NO_WHATSAPP', label: 'Números sin WhatsApp' },
   130472: { category: 'META_EXPERIMENT', label: 'Bloqueados por experimento de Meta' },

@@ -1183,6 +1183,40 @@
   .headerPhone { font-size: 1rem; }
 }
 
+/* ── Sidebar: Detalles de Contacto — overlay en pantallas angostas ── */
+.detailsBackdrop {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .detailsBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 99;
+  }
+
+  .detailsSidebar {
+    position: fixed !important;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 320px !important;
+    max-width: 85vw !important;
+    min-width: 260px !important;
+    z-index: 100;
+    box-shadow: -4px 0 40px rgba(0, 0, 0, 0.8);
+  }
+}
+
+@media (max-width: 480px) {
+  .detailsSidebar {
+    width: 280px !important;
+    min-width: 240px !important;
+  }
+}
+
 .rotateSpinner {
   animation: spin 1s linear infinite;
   display: inline-flex;

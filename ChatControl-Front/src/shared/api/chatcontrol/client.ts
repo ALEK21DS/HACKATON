@@ -499,6 +499,8 @@ export type WhatsappTier = 'new' | 'level1' | 'level2' | 'level3' | 'excellent';
 export interface SettingsData {
   whatsappTier: WhatsappTier;
   dailyLimit: number | null; // null = ilimitado
+  dailyUsed: number;
+  dailyRemaining: number | null; // null = ilimitado
   geminiModel: string;
   geminiModelInUse: string;
 }

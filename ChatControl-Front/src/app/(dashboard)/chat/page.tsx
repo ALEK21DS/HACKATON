@@ -650,7 +650,7 @@ export default function ChatPage() {
       </aside>
 
       {/* ── Main: Área de Conversación ── */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#040404', position: 'relative' }}>
+      <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#040404', position: 'relative' }}>
         {selectedId ? (
           <>
             {/* Header del Chat */}
@@ -1002,18 +1002,21 @@ export default function ChatPage() {
 
       {/* ── Sidebar: Detalles de Contacto ── */}
       {detailsOpen && selectedConv && (
-        <aside style={{
-          width: '340px',
-          minWidth: '300px',
-          background: '#0d0d0d',
-          borderLeft: '1px solid rgba(255,255,255,0.05)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflowY: 'auto',
-          zIndex: 15,
-          padding: '1.5rem',
-          animation: 'slideInRight 0.3s ease-out',
-        }} className="custom-scrollbar" onScroll={handleDetailsScroll}>
+        <>
+          <div className={styles.detailsBackdrop} onClick={() => setDetailsOpen(false)} />
+          <aside className={`${styles.detailsSidebar} custom-scrollbar`} style={{
+            width: '340px',
+            minWidth: '300px',
+            flexShrink: 0,
+            background: '#0d0d0d',
+            borderLeft: '1px solid rgba(255,255,255,0.05)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflowY: 'auto',
+            zIndex: 15,
+            padding: '1.5rem',
+            animation: 'slideInRight 0.3s ease-out',
+          }} onScroll={handleDetailsScroll}>
           {/* Cabecera */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, color: '#EF4444' }}>
@@ -1186,6 +1189,7 @@ export default function ChatPage() {
             )}
           </div>
         </aside>
+        </>
       )}
 
       {/* Lightbox / Fullscreen Image Preview */}
