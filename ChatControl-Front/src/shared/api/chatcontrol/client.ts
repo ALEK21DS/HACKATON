@@ -348,7 +348,7 @@ export async function sendBroadcast(params: {
   templateAutoNameVariables?: string[];
   templateHeaderValue?: string;
   templateButtonVariables?: Record<string, string>;
-}): Promise<{ sent: number; failed: number; errors: Array<{ conversationId: string; error: string }> }> {
+}): Promise<{ started: true; total: number }> {
   return api('/broadcast/send', {
     method: 'POST',
     body: JSON.stringify(params),

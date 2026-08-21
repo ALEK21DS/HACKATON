@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MessageDirection, MessageStatus, MessageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -46,8 +46,23 @@ export interface BroadcastTemplate {
   buttons?: Array<{ index: number; type: string; text: string }>;
 }
 
+interface SendBroadcastParams {
+  organizationId: string;
+  userId: string | null;
+  conversationIds: string[];
+  type: BroadcastMessageType;
+  text: string;
+  templateId?: string;
+  templateVariables?: Record<string, string>;
+  templateAutoNameVariables?: string[];
+  templateHeaderValue?: string;
+  templateButtonVariables?: Record<string, string>;
+}
+
 @Injectable()
 export class BroadcastService {
+  private readonly logger = new Logger(BroadcastService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly chat: ChatService,
@@ -235,18 +250,7 @@ export class BroadcastService {
     return this.ai.generateFromInstruction(organizationId, instruction.trim());
   }
 
-  async sendBroadcast(params: {
-    organizationId: string;
-    userId: string | null;
-    conversationIds: string[];
-    type: BroadcastMessageType;
-    text: string;
-    templateId?: string;
-    templateVariables?: Record<string, string>;
-    templateAutoNameVariables?: string[];
-    templateHeaderValue?: string;
-    templateButtonVariables?: Record<string, string>;
-  }): Promise<{ sent: number; failed: number; errors: Array<{ conversationId: string; error: string }> }> {
+  async sendBroadcast(params: SendBroadcastParams): Promise<{ started: true; total: number }> {
     const { organizationId, userId, conversationIds, type, text } = params;
     if (!conversationIds?.length) {
       throw new BadRequestException('Selecciona al menos un contacto');
@@ -309,6 +313,55 @@ export class BroadcastService {
     }
 
     this.gateway.emitBroadcastStarted(organizationId, validIds.length);
+
+    // El envío en sí puede tardar varios minutos con listas grandes (throttling + límites de Meta).
+    // No se espera acá: se dispara en segundo plano y el resultado final viaja por WebSocket
+    // (broadcast_completed), para no dejar la petición HTTP colgada todo ese tiempo.
+    this.runBroadcastLoop({
+      organizationId,
+      userId,
+      type,
+      validIds,
+      contactMap,
+      isMetaTemplate,
+      metaT,
+      metaTemplateName,
+      metaTemplateLanguage,
+      messageToSend,
+      params,
+    }).catch((err) => {
+      this.logger.error('Error inesperado en el envío masivo en segundo plano', err);
+    });
+
+    return { started: true, total: validIds.length };
+  }
+
+  private async runBroadcastLoop(ctx: {
+    organizationId: string;
+    userId: string | null;
+    type: BroadcastMessageType;
+    validIds: string[];
+    contactMap: Map<string, BroadcastContact>;
+    isMetaTemplate: boolean | undefined;
+    metaT: MetaTemplateDto | null;
+    metaTemplateName: string;
+    metaTemplateLanguage: string;
+    messageToSend: string;
+    params: SendBroadcastParams;
+  }): Promise<void> {
+    const {
+      organizationId,
+      userId,
+      type,
+      validIds,
+      contactMap,
+      isMetaTemplate,
+      metaT,
+      metaTemplateName,
+      metaTemplateLanguage,
+      messageToSend,
+      params,
+    } = ctx;
 
     let sent = 0;
     let failed = 0;
@@ -430,7 +483,7 @@ export class BroadcastService {
       }
     }
 
-    return { sent, failed, errors };
+    this.gateway.emitBroadcastCompleted(organizationId, { sent, failed, errors });
   }
 
   /** Cuenta mensajes salientes marcados como FAILED (vía webhook de estado) en la ventana reciente,

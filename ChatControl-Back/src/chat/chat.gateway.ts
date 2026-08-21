@@ -241,6 +241,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(`org:${organizationId}`).emit('broadcast_message_sent', { conversationId, index });
   }
 
+  emitBroadcastCompleted(
+    organizationId: string,
+    result: { sent: number; failed: number; errors: Array<{ conversationId: string; error: string }> },
+  ): void {
+    this.server.to(`org:${organizationId}`).emit('broadcast_completed', result);
+  }
+
   emitMessageEdited(organizationId: string, conversationId: string, messageId: string, newText: string): void {
     const payload = {
       conversationId,
