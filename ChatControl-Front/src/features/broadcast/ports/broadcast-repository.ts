@@ -13,5 +13,5 @@ export interface BroadcastRepository {
     templateAutoNameVariables?: string[];
     templateHeaderValue?: string;
     templateButtonVariables?: Record<string, string>;
-  }): Promise<{ sent: number; failed: number; errors: Array<{ conversationId: string; error: string }> }>;
+  }): Promise<{ started: true; total: number }>;
 }

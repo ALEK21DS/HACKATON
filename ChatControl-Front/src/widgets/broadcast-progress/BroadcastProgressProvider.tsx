@@ -70,6 +70,9 @@ export function BroadcastProgressProvider({ children }: { children: React.ReactN
   const [failuresByCategory, setFailuresByCategory] = useState<Map<string, CategoryBucket>>(new Map());
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  const pendingCompletionRef = useRef<{
+    resolve: (r: { sent: number; failed: number; errors: Array<{ conversationId: string; error: string }> }) => void;
+  } | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -87,6 +90,10 @@ export function BroadcastProgressProvider({ children }: { children: React.ReactN
     });
     socket.on('broadcast_message_failed', () => {
       setBroadcastProgress(prev => prev ? { ...prev, failedCount: prev.failedCount + 1 } : prev);
+    });
+    socket.on('broadcast_completed', (result: { sent: number; failed: number; errors: Array<{ conversationId: string; error: string }> }) => {
+      pendingCompletionRef.current?.resolve(result);
+      pendingCompletionRef.current = null;
     });
     socket.on('message_delivery_failed', (p: {
       conversationId: string; contactPhone: string; contactName: string | null;
@@ -121,12 +128,32 @@ export function BroadcastProgressProvider({ children }: { children: React.ReactN
     setSendResultMessage('');
   }, []);
 
+  // Tiempo máximo de espera del evento broadcast_completed antes de darse por vencido
+  // (envíos muy grandes pueden tardar bastante; esto es solo un techo de seguridad).
+  const COMPLETION_TIMEOUT_MS = 30 * 60 * 1000;
+
   const startBroadcastSend = useCallback(async (params: SendBroadcastParams) => {
     setSending(true);
     setSendError('');
     setSendResultMessage('');
     try {
-      const result = await sendBroadcast(params);
+      // Esto ahora responde casi al instante: solo confirma que el envío arrancó.
+      // El resultado final (enviados/fallidos) llega después por WebSocket (broadcast_completed),
+      // en vez de mantener esta petición HTTP abierta todo el tiempo que dure el envío.
+      await sendBroadcast(params);
+
+      const result = await new Promise<{ sent: number; failed: number; errors: Array<{ conversationId: string; error: string }> }>(
+        (resolve, reject) => {
+          const timeoutId = setTimeout(() => {
+            pendingCompletionRef.current = null;
+            reject(new Error('El envío está tardando más de lo esperado. Revisa el historial para confirmar el resultado.'));
+          }, COMPLETION_TIMEOUT_MS);
+          pendingCompletionRef.current = {
+            resolve: (r) => { clearTimeout(timeoutId); resolve(r); },
+          };
+        },
+      );
+
       if (result.sent === 0 && result.failed > 0) {
         setSendError(`No se envió ningún mensaje (${result.failed} fallidos). ${result.errors[0]?.error ?? ''}`);
       } else if (result.failed > 0) {
