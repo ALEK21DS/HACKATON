@@ -92,6 +92,34 @@ export class SettingsService {
     return result.length;
   }
 
+  /**
+   * Momento en que el contador de cupo diario va a bajar por primera vez: el mensaje más reciente
+   * de la conversación que menos falta le queda para cumplir 24h (cada conversación cuenta hasta que
+   * SU último mensaje saliente cumple 24h, no todas a la vez). Null si no hay nada contando ahora mismo.
+   */
+  async getNextCapacityFreeAt(organizationId: string): Promise<Date | null> {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const grouped = await this.prisma.message.groupBy({
+      by: ['conversationId'],
+      where: {
+        direction: MessageDirection.OUT,
+        whatsappTimestamp: { gte: since },
+        conversation: { contact: { organizationId } },
+      },
+      _max: { whatsappTimestamp: true },
+    });
+    if (!grouped.length) return null;
+
+    let earliest: Date | null = null;
+    for (const g of grouped) {
+      const t = g._max.whatsappTimestamp;
+      if (t && (!earliest || t < earliest)) earliest = t;
+    }
+    if (!earliest) return null;
+
+    return new Date(earliest.getTime() + 24 * 60 * 60 * 1000);
+  }
+
   async checkDailyLimitOrThrow(conversationId: string, organizationId: string): Promise<void> {
     const limit = await this.getDailyLimit(organizationId);
     if (limit === Number.MAX_SAFE_INTEGER) return;

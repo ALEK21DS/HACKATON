@@ -175,6 +175,32 @@ export default function BroadcastPage() {
     }
   }, []);
 
+  // Refresca "Capacidad de hoy" y se auto-reprograma para el momento exacto en que el
+  // próximo mensaje cumple 24h (nextFreeAt), en vez de hacer polling a ciegas cada N minutos.
+  const dailyUsageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshDailyUsage = useCallback(async () => {
+    if (dailyUsageTimeoutRef.current) {
+      clearTimeout(dailyUsageTimeoutRef.current);
+      dailyUsageTimeoutRef.current = null;
+    }
+    try {
+      const data = await getSettings();
+      setDailyUsage(data);
+      if (data.nextFreeAt) {
+        const delay = new Date(data.nextFreeAt).getTime() - Date.now() + 3000; // +3s de margen
+        if (delay > 0) {
+          dailyUsageTimeoutRef.current = setTimeout(() => { refreshDailyUsage(); }, delay);
+        }
+      }
+    } catch {
+      // Silencioso: el badge simplemente no se actualiza hasta el próximo intento.
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => { if (dailyUsageTimeoutRef.current) clearTimeout(dailyUsageTimeoutRef.current); };
+  }, []);
+
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
@@ -202,7 +228,7 @@ export default function BroadcastPage() {
         setTemplates(tl);
         setCampaigns(campaignsData);
         await loadCrmLists();
-        getSettings().then(setDailyUsage).catch(() => {});
+        refreshDailyUsage();
 
         if (campaignsData.length > 0) {
           const allIds = campaignsData.map(c => c.id);
@@ -211,7 +237,7 @@ export default function BroadcastPage() {
         }
       } catch (err) {} finally { setLoading(false); setLoadingCampaigns(false); }
     })();
-  }, [mounted, router, searchParams, loadCrmLists]);
+  }, [mounted, router, searchParams, loadCrmLists, refreshDailyUsage]);
 
   const onlyCanSend = messageType !== 'template';
   const campaignIdsKey = Array.from(selectedCampaignIds).sort().join(',');
@@ -413,6 +439,8 @@ export default function BroadcastPage() {
       }
     } catch {
       // El error ya queda reflejado en el toast global de BroadcastProgressProvider.
+    } finally {
+      refreshDailyUsage();
     }
   };
 
@@ -664,20 +692,6 @@ export default function BroadcastPage() {
               <div style={{ fontSize: '0.65rem', color: '#666', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>
                 Excel con columnas &quot;nombre&quot; y &quot;numero&quot;
               </div>
-              {dailyRemaining != null && (
-                <div style={{
-                  marginBottom: 8,
-                  padding: '0.5rem 0.75rem',
-                  borderRadius: 8,
-                  background: excelExceedsCapacity ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.02)',
-                  border: `1px solid ${excelExceedsCapacity ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.05)'}`,
-                  fontSize: '0.72rem',
-                  color: excelExceedsCapacity ? '#EF4444' : '#8C8C8C',
-                  fontWeight: 700,
-                }}>
-                  Capacidad de hoy: {dailyUsage?.dailyUsed ?? 0}/{dailyUsage?.dailyLimit ?? 0} usados · {dailyRemaining} disponibles
-                </div>
-              )}
               <button
                 type="button"
                 onClick={handleDownloadExcelTemplate}
@@ -941,6 +955,27 @@ export default function BroadcastPage() {
               <a href="/broadcast/audit" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#666', textTransform: 'uppercase', textDecoration: 'none' }}>Auditoría</a>
             </div>
             <p style={{ color: '#666', fontSize: '0.95rem' }}>Configura y dispara campañas masivas de alta tasa de apertura.</p>
+
+            {dailyUsage?.dailyLimit != null && (
+              <div style={{
+                marginTop: '1.25rem',
+                padding: '0.9rem 1.25rem',
+                borderRadius: 14,
+                background: (dailyUsage.dailyRemaining ?? 0) <= 0 ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.02)',
+                border: `1px solid ${(dailyUsage.dailyRemaining ?? 0) <= 0 ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.06)'}`,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.35rem',
+                maxWidth: 680,
+              }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 800, color: (dailyUsage.dailyRemaining ?? 0) <= 0 ? '#EF4444' : '#F2F2F2' }}>
+                  Capacidad de envío hoy: {dailyUsage.dailyUsed}/{dailyUsage.dailyLimit} usados · {dailyUsage.dailyRemaining ?? 0} disponibles
+                </span>
+                <span style={{ fontSize: '0.7rem', color: '#8C8C8C', lineHeight: 1.5 }}>
+                  Este cupo no se reinicia todo junto a una hora fija: cada mensaje libera su espacio 24 horas después de haberse enviado. Por eso los &quot;disponibles&quot; van subiendo poco a poco durante el día, no de golpe.
+                </span>
+              </div>
+            )}
           </header>
 
           {/* Selector de Tipo de Mensaje */}

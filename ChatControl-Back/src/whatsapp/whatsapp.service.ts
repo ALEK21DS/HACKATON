@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { SecretsCryptoService } from '../common/secrets-crypto.service';
@@ -55,6 +55,7 @@ export interface ResolvedWhatsappCreds {
 @Injectable()
 export class WhatsAppService {
   private readonly baseUrl = 'https://graph.facebook.com/v18.0';
+  private readonly logger = new Logger(WhatsAppService.name);
 
   constructor(
     private readonly config: ConfigService,
@@ -504,5 +505,29 @@ export class WhatsAppService {
       whatsappTier: tier,
       dailyLimit: dailyLimit === Number.MAX_SAFE_INTEGER ? null : dailyLimit,
     };
+  }
+
+  /**
+   * Re-sincroniza el tier de mensajería de todas las organizaciones con WhatsApp configurado.
+   * Se dispara cuando llega el webhook `phone_number_quality_update` de Meta: ese evento no trae
+   * el phone_number_id (solo display_phone_number), así que en vez de intentar mapear a una sola
+   * organización, se refresca el tier real de todas — es una llamada barata y evita depender de un
+   * matching frágil por número de teléfono.
+   */
+  async resyncAllOrganizationsMessagingLimit(): Promise<void> {
+    const orgs = await this.prisma.organization.findMany({
+      where: { whatsappPhoneNumberId: { not: null } },
+      select: { id: true, name: true },
+    });
+    for (const org of orgs) {
+      try {
+        const result = await this.syncMessagingLimit(org.id);
+        this.logger.log(
+          `Tier re-sincronizado por webhook para org=${org.name} (${org.id}): ${result.whatsappTier} (${result.dailyLimit ?? 'ilimitado'}/día)`,
+        );
+      } catch (err) {
+        this.logger.warn(`No se pudo re-sincronizar tier para org=${org.name} (${org.id}): ${err}`);
+      }
+    }
   }
 }

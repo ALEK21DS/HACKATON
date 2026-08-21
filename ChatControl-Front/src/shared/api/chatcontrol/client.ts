@@ -501,6 +501,7 @@ export interface SettingsData {
   dailyLimit: number | null; // null = ilimitado
   dailyUsed: number;
   dailyRemaining: number | null; // null = ilimitado
+  nextFreeAt: string | null; // ISO: cuándo baja el contador por primera vez
   geminiModel: string;
   geminiModelInUse: string;
 }
