@@ -562,6 +562,10 @@ export default function BroadcastPage() {
   const dailyRemaining = dailyUsage?.dailyRemaining ?? null; // null = ilimitado
   const excelExceedsCapacity =
     dailyRemaining != null && excelPreviewRows.length > 0 && excelPreviewRows.length > dailyRemaining;
+  const capacityBlocked = dailyRemaining === 0;
+  const nextFreeAtLabel = dailyUsage?.nextFreeAt
+    ? new Date(dailyUsage.nextFreeAt).toLocaleString('es-EC', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })
+    : null;
 
   const forceMetaTemplate = contactSource === 'excel_import' && (excelImportResult?.outOfWindowCount ?? 0) > 0;
 
@@ -1233,33 +1237,47 @@ export default function BroadcastPage() {
           </div>
 
           {/* Confirmación y Envío */}
-          <div style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.5rem 2.5rem', background: 'rgba(239, 68, 68, 0.03)', border: '1px solid rgba(239, 68, 68, 0.1)', borderRadius: '24px' }}>
-            <div>
-              <span style={{ fontSize: '1.25rem', fontWeight: 900, color: 'white', display: 'block' }}>{selectedIds.size}</span>
-              <span style={{ fontSize: '0.7rem', color: '#666', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Contactos Seleccionados</span>
-            </div>
-            <button
-              onClick={handleSend}
-              disabled={
-                sending ||
-                selectedIds.size === 0 ||
-                templateHeaderUploading ||
-                (messageType === 'template' && !!selectedTemplate?.header && selectedTemplate.header.format !== 'TEXT' && !templateHeaderValue)
-              }
-              style={{
-                padding: '1.25rem 3rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '16px', color: 'white', fontWeight: 900, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.15em', cursor: 'pointer', transition: 'all 0.3s ease',
-                boxShadow: '0 10px 30px rgba(239, 68, 68, 0.4)', opacity: (
+          <div style={{ marginTop: '2.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.5rem 2.5rem', background: 'rgba(239, 68, 68, 0.03)', border: '1px solid rgba(239, 68, 68, 0.1)', borderRadius: '24px' }}>
+              <div>
+                <span style={{ fontSize: '1.25rem', fontWeight: 900, color: 'white', display: 'block' }}>{selectedIds.size}</span>
+                <span style={{ fontSize: '0.7rem', color: '#666', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Contactos Seleccionados</span>
+              </div>
+              <button
+                onClick={handleSend}
+                disabled={
                   sending ||
                   selectedIds.size === 0 ||
                   templateHeaderUploading ||
+                  capacityBlocked ||
                   (messageType === 'template' && !!selectedTemplate?.header && selectedTemplate.header.format !== 'TEXT' && !templateHeaderValue)
-                ) ? 0.5 : 1,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'
-              }}
-            >
-              {sending ? <Spinner size={16} /> : null}
-              {sending ? 'Lanzando...' : 'Lanzar Masivos'}
-            </button>
+                }
+                style={{
+                  padding: '1.25rem 3rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '16px', color: 'white', fontWeight: 900, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.15em', cursor: capacityBlocked ? 'not-allowed' : 'pointer', transition: 'all 0.3s ease',
+                  boxShadow: '0 10px 30px rgba(239, 68, 68, 0.4)', opacity: (
+                    sending ||
+                    selectedIds.size === 0 ||
+                    templateHeaderUploading ||
+                    capacityBlocked ||
+                    (messageType === 'template' && !!selectedTemplate?.header && selectedTemplate.header.format !== 'TEXT' && !templateHeaderValue)
+                  ) ? 0.5 : 1,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'
+                }}
+              >
+                {sending ? <Spinner size={16} /> : null}
+                {sending ? 'Lanzando...' : capacityBlocked ? 'Sin cupo hoy' : 'Lanzar Masivos'}
+              </button>
+            </div>
+            {capacityBlocked && (
+              <p style={{ margin: 0, padding: '0 0.5rem', fontSize: '0.75rem', color: '#EF4444', fontWeight: 600 }}>
+                Se agotó el cupo diario de WhatsApp ({dailyUsage?.dailyUsed ?? 0}/{dailyUsage?.dailyLimit ?? 0}) — no se puede lanzar hasta que se libere espacio{nextFreeAtLabel ? ` (aprox. ${nextFreeAtLabel})` : ''}.
+              </p>
+            )}
+            {!capacityBlocked && dailyRemaining != null && selectedIds.size > dailyRemaining && (
+              <p style={{ margin: 0, padding: '0 0.5rem', fontSize: '0.75rem', color: '#F59E0B', fontWeight: 600 }}>
+                Seleccionaste {selectedIds.size} contactos pero hoy solo quedan {dailyRemaining} cupos — algunos podrían no enviarse.
+              </p>
+            )}
           </div>
         </div>
       </main>
