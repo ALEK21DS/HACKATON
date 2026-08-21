@@ -31,6 +31,9 @@ export function classifyWhatsAppFailure(input: { code?: number; message?: string
   if (msg.includes('sandbox')) {
     return { category: 'SANDBOX_BLOCKED', label: 'No autorizado en sandbox de Meta' };
   }
+  if (msg.includes('límite de spam') || msg.includes('limite de spam')) {
+    return { category: 'SPAM_BLOCKED', label: 'Rechazados para evitar spam' };
+  }
 
   return { category: 'OTHER', label: 'Otro motivo' };
 }
