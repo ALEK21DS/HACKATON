@@ -15,10 +15,11 @@ export class SettingsController {
   constructor(private readonly settings: SettingsService) {}
 
   private async buildResponse(organizationId: string) {
-    const [whatsappTier, dailyLimit, dailyUsed, geminiModel, geminiModelInUse] = await Promise.all([
+    const [whatsappTier, dailyLimit, dailyUsed, nextFreeAt, geminiModel, geminiModelInUse] = await Promise.all([
       this.settings.getWhatsappTier(organizationId),
       this.settings.getDailyLimit(organizationId),
       this.settings.getDailyConversationCount(organizationId),
+      this.settings.getNextCapacityFreeAt(organizationId),
       this.settings.getGeminiModel(organizationId),
       this.settings.getGeminiModelInUse(organizationId),
     ]);
@@ -28,6 +29,7 @@ export class SettingsController {
       dailyLimit: isUnlimited ? null : dailyLimit,
       dailyUsed,
       dailyRemaining: isUnlimited ? null : Math.max(0, dailyLimit - dailyUsed),
+      nextFreeAt: isUnlimited ? null : nextFreeAt?.toISOString() ?? null,
       geminiModel,
       geminiModelInUse,
     };

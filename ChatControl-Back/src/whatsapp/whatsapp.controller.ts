@@ -79,9 +79,26 @@ export class WhatsAppController {
     if (value.object !== 'whatsapp_business_account' || !Array.isArray(value.entry)) return;
 
     for (const entry of value.entry) {
-      const changes = entry.changes as Array<{ value?: Record<string, unknown> }> | undefined;
+      const changes = entry.changes as
+        | Array<{ field?: string; value?: Record<string, unknown> }>
+        | undefined;
       if (!changes) continue;
       for (const change of changes) {
+        if (change.field === 'phone_number_quality_update') {
+          const qualityVal = change.value as
+            | { event?: string; current_limit?: string; display_phone_number?: string }
+            | undefined;
+          this.logger.log(
+            `phone_number_quality_update recibido: event=${qualityVal?.event} current_limit=${qualityVal?.current_limit} display_phone_number=${qualityVal?.display_phone_number}`,
+          );
+          // No trae phone_number_id, así que no se puede mapear a una sola organización con certeza;
+          // se re-sincroniza el tier real de todas las organizaciones configuradas.
+          this.whatsapp.resyncAllOrganizationsMessagingLimit().catch((err) =>
+            this.logger.error('Error re-sincronizando tiers tras phone_number_quality_update', err),
+          );
+          continue;
+        }
+
         const val = change.value as
           | {
               contacts?: Array<{
