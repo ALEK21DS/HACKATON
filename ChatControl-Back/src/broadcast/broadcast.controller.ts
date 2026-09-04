@@ -118,4 +118,23 @@ export class BroadcastController {
   async getBroadcastAudit(@CurrentUser() user: AuthUser) {
     return this.broadcast.getBroadcastAuditLogs(user.organizationId!);
   }
+
+  @Get('runs')
+  async getRuns(@CurrentUser() user: AuthUser) {
+    const runs = await this.broadcast.getBroadcastRuns(user.organizationId!);
+    return { runs };
+  }
+
+  @Get('runs/:runId/contacts')
+  async getRunContacts(
+    @CurrentUser() user: AuthUser,
+    @Param('runId') runId: string,
+    @Query('split') split: string,
+  ) {
+    if (split !== 'sent' && split !== 'failed') {
+      throw new BadRequestException('split debe ser "sent" o "failed"');
+    }
+    const contacts = await this.broadcast.getBroadcastRunContacts(user.organizationId!, runId, split);
+    return { contacts };
+  }
 }

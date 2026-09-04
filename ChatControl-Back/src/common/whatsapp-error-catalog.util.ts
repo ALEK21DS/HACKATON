@@ -11,6 +11,16 @@ interface FailureClassification {
   label: string;
 }
 
+/** Etiquetas cortas (una palabra) para filtros y columnas de tabla — distinto del `label` descriptivo del toast. */
+export const FAILURE_CATEGORY_FILTER_LABELS: Record<BroadcastFailureCategory, string> = {
+  SPAM_BLOCKED: 'Spam',
+  META_EXPERIMENT: 'Experimento',
+  NO_WHATSAPP: 'Sin WhatsApp',
+  OUT_OF_WINDOW: 'Fuera de ventana',
+  SANDBOX_BLOCKED: 'Sandbox',
+  OTHER: 'Plataforma/Conexión',
+};
+
 const CODE_CATEGORY_MAP: Record<number, FailureClassification> = {
   131048: { category: 'SPAM_BLOCKED', label: 'Rechazados por límite de spam' },
   131049: { category: 'SPAM_BLOCKED', label: 'Rechazados para evitar spam' },
@@ -35,5 +45,5 @@ export function classifyWhatsAppFailure(input: { code?: number; message?: string
     return { category: 'SPAM_BLOCKED', label: 'Rechazados para evitar spam' };
   }
 
-  return { category: 'OTHER', label: 'Otro motivo' };
+  return { category: 'OTHER', label: 'Error de conexión / plataforma' };
 }

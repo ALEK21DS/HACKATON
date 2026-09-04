@@ -758,6 +758,41 @@ export async function getBroadcastAuditLogs(): Promise<BroadcastLogEntry[]> {
   return api<BroadcastLogEntry[]>('/broadcast/audit/broadcast');
 }
 
+// ── Masivos Enviados (envíos agrupados por "run") ──
+
+export interface BroadcastRun {
+  runId: string;
+  type: string;
+  startedAt: string;
+  sent: number;
+  failed: number;
+}
+
+export interface BroadcastRunContact {
+  name: string | null;
+  phone: string;
+  status: string;
+  failureCategory: string | null;
+  failureLabel: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export async function getBroadcastRuns(): Promise<BroadcastRun[]> {
+  const { runs } = await api<{ runs: BroadcastRun[] }>('/broadcast/runs');
+  return runs;
+}
+
+export async function getBroadcastRunContacts(
+  runId: string,
+  split: 'sent' | 'failed',
+): Promise<BroadcastRunContact[]> {
+  const { contacts } = await api<{ contacts: BroadcastRunContact[] }>(
+    `/broadcast/runs/${encodeURIComponent(runId)}/contacts?split=${split}`,
+  );
+  return contacts;
+}
+
 export async function sendMediaFile(
   conversationId: string,
   file: File,

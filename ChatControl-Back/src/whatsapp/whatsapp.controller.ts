@@ -193,6 +193,19 @@ export class WhatsAppController {
                       label: classification.label,
                       detail: failureInfo!.message || failureInfo!.title || 'Error desconocido',
                     });
+
+                    // El BroadcastLog de este mensaje se escribió como 'sent' al momento del envío
+                    // (WhatsApp lo había aceptado); este es el único punto donde se entera el motivo
+                    // real de rechazo (spam/experimento/etc.), así que se corrige acá para que
+                    // "Masivos Enviados" muestre el resultado real, no el estado inicial optimista.
+                    await this.prisma.broadcastLog.updateMany({
+                      where: { messageId: msg.id },
+                      data: {
+                        status: 'failed',
+                        failureCategory: classification.category,
+                        errorMessage: failureInfo!.message || failureInfo!.title || 'Error desconocido',
+                      },
+                    });
                   }
                 }
               }
