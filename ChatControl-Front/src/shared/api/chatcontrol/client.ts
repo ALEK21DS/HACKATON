@@ -343,6 +343,7 @@ export async function sendBroadcast(params: {
   conversationIds: string[];
   type: BroadcastMessageType;
   text?: string;
+  title?: string;
   templateId?: string;
   templateVariables?: Record<string, string>;
   templateAutoNameVariables?: string[];
@@ -756,6 +757,45 @@ export interface BroadcastLogEntry {
 
 export async function getBroadcastAuditLogs(): Promise<BroadcastLogEntry[]> {
   return api<BroadcastLogEntry[]>('/broadcast/audit/broadcast');
+}
+
+// ── Masivos Enviados (envíos agrupados por "run") ──
+
+export interface BroadcastRun {
+  runId: string;
+  type: string;
+  title: string | null;
+  startedAt: string;
+  sent: number;
+  failed: number;
+}
+
+export interface BroadcastRunContact {
+  name: string | null;
+  phone: string;
+  status: string;
+  failureCategory: string | null;
+  failureLabel: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export async function getBroadcastRuns(): Promise<BroadcastRun[]> {
+  const { runs } = await api<{ runs: BroadcastRun[] }>('/broadcast/runs');
+  return runs;
+}
+
+export async function getBroadcastRunContacts(
+  runId: string,
+  params: { cursor?: string; limit?: number; status?: 'sent' | 'failed'; category?: string } = {},
+): Promise<{ contacts: BroadcastRunContact[]; nextCursor: string | null }> {
+  const qs = new URLSearchParams();
+  if (params.cursor) qs.set('cursor', params.cursor);
+  if (params.limit) qs.set('limit', String(params.limit));
+  if (params.status) qs.set('status', params.status);
+  if (params.category) qs.set('category', params.category);
+  const query = qs.toString();
+  return api(`/broadcast/runs/${encodeURIComponent(runId)}/contacts${query ? `?${query}` : ''}`);
 }
 
 export async function sendMediaFile(

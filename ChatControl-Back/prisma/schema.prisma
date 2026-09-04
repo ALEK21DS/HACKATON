@@ -313,18 +313,23 @@ model MessageEditHistory {
 }
 
 model BroadcastLog {
-  id             String   @id @default(cuid())
-  conversationId String
-  type           String
-  status         String
-  errorMessage   String?
-  createdAt      DateTime @default(now())
-  organizationId String?
-  userId         String?
+  id              String   @id @default(cuid())
+  conversationId  String
+  type            String
+  status          String
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+  organizationId  String?
+  userId          String?
+  runId           String?
+  messageId       String?  @unique
+  failureCategory String?
+  title           String?
 
   @@index([conversationId])
   @@index([organizationId])
   @@index([createdAt(sort: Desc)])
+  @@index([runId])
 }
 
 /// Configuración global legacy (tier, modelo por defecto). Preferir OrganizationSetting por tenant.

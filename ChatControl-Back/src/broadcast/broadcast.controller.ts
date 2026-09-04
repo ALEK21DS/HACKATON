@@ -118,4 +118,30 @@ export class BroadcastController {
   async getBroadcastAudit(@CurrentUser() user: AuthUser) {
     return this.broadcast.getBroadcastAuditLogs(user.organizationId!);
   }
+
+  @Get('runs')
+  async getRuns(@CurrentUser() user: AuthUser) {
+    const runs = await this.broadcast.getBroadcastRuns(user.organizationId!);
+    return { runs };
+  }
+
+  @Get('runs/:runId/contacts')
+  async getRunContacts(
+    @CurrentUser() user: AuthUser,
+    @Param('runId') runId: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('category') category?: string,
+  ) {
+    if (status !== undefined && status !== 'sent' && status !== 'failed') {
+      throw new BadRequestException('status debe ser "sent" o "failed"');
+    }
+    return this.broadcast.getBroadcastRunContacts(user.organizationId!, runId, {
+      cursor,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      status: status as 'sent' | 'failed' | undefined,
+      category,
+    });
+  }
 }
