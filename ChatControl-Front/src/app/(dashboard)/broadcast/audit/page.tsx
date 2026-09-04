@@ -93,6 +93,7 @@ export default function AuditPage() {
             <Link href="/broadcast" style={subNavStyle(false)}>Campañas</Link>
             <Link href="/templates" style={subNavStyle(false)}>Templates</Link>
             <Link href="/broadcast/crm-lists" style={subNavStyle(false)}>Listas CRM</Link>
+            <Link href="/broadcast/sent" style={subNavStyle(false)}>Enviados</Link>
             <Link href="/broadcast/audit" style={subNavStyle(true)}>Auditoría</Link>
           </div>
           <h1 style={{ fontSize: '2rem', fontWeight: 900, margin: 0 }}>Auditoría</h1>
