@@ -324,6 +324,7 @@ model BroadcastLog {
   runId           String?
   messageId       String?  @unique
   failureCategory String?
+  title           String?
 
   @@index([conversationId])
   @@index([organizationId])

@@ -1,4 +1,4 @@
-import { IsArray, IsIn, IsObject, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsArray, IsIn, IsObject, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export type BroadcastMessageType = 'manual' | 'template' | 'ia';
 
@@ -12,6 +12,12 @@ export class SendBroadcastDto {
 
   @IsIn(BROADCAST_TYPES)
   type!: BroadcastMessageType;
+
+  /** Título interno del lote, solo para auditoría — nunca se envía a WhatsApp. */
+  @IsString()
+  @IsOptional()
+  @MaxLength(120)
+  title?: string;
 
   @IsString()
   @IsOptional()

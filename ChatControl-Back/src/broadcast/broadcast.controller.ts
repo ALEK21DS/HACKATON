@@ -129,12 +129,19 @@ export class BroadcastController {
   async getRunContacts(
     @CurrentUser() user: AuthUser,
     @Param('runId') runId: string,
-    @Query('split') split: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('category') category?: string,
   ) {
-    if (split !== 'sent' && split !== 'failed') {
-      throw new BadRequestException('split debe ser "sent" o "failed"');
+    if (status !== undefined && status !== 'sent' && status !== 'failed') {
+      throw new BadRequestException('status debe ser "sent" o "failed"');
     }
-    const contacts = await this.broadcast.getBroadcastRunContacts(user.organizationId!, runId, split);
-    return { contacts };
+    return this.broadcast.getBroadcastRunContacts(user.organizationId!, runId, {
+      cursor,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      status: status as 'sent' | 'failed' | undefined,
+      category,
+    });
   }
 }

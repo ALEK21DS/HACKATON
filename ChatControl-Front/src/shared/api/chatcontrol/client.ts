@@ -343,6 +343,7 @@ export async function sendBroadcast(params: {
   conversationIds: string[];
   type: BroadcastMessageType;
   text?: string;
+  title?: string;
   templateId?: string;
   templateVariables?: Record<string, string>;
   templateAutoNameVariables?: string[];
@@ -763,6 +764,7 @@ export async function getBroadcastAuditLogs(): Promise<BroadcastLogEntry[]> {
 export interface BroadcastRun {
   runId: string;
   type: string;
+  title: string | null;
   startedAt: string;
   sent: number;
   failed: number;
@@ -785,12 +787,15 @@ export async function getBroadcastRuns(): Promise<BroadcastRun[]> {
 
 export async function getBroadcastRunContacts(
   runId: string,
-  split: 'sent' | 'failed',
-): Promise<BroadcastRunContact[]> {
-  const { contacts } = await api<{ contacts: BroadcastRunContact[] }>(
-    `/broadcast/runs/${encodeURIComponent(runId)}/contacts?split=${split}`,
-  );
-  return contacts;
+  params: { cursor?: string; limit?: number; status?: 'sent' | 'failed'; category?: string } = {},
+): Promise<{ contacts: BroadcastRunContact[]; nextCursor: string | null }> {
+  const qs = new URLSearchParams();
+  if (params.cursor) qs.set('cursor', params.cursor);
+  if (params.limit) qs.set('limit', String(params.limit));
+  if (params.status) qs.set('status', params.status);
+  if (params.category) qs.set('category', params.category);
+  const query = qs.toString();
+  return api(`/broadcast/runs/${encodeURIComponent(runId)}/contacts${query ? `?${query}` : ''}`);
 }
 
 export async function sendMediaFile(

@@ -57,6 +57,7 @@ interface SendBroadcastParams {
   conversationIds: string[];
   type: BroadcastMessageType;
   text: string;
+  title?: string;
   templateId?: string;
   templateVariables?: Record<string, string>;
   templateAutoNameVariables?: string[];
@@ -397,7 +398,7 @@ export class BroadcastService {
       }
 
       if (circuitOpen) {
-        await this.logBroadcast(organizationId, userId, runId, conversationId, type, 'failed', CIRCUIT_BREAKER_REASON);
+        await this.logBroadcast(organizationId, userId, runId, conversationId, type, 'failed', CIRCUIT_BREAKER_REASON, undefined, params.title);
         this.gateway.emitBroadcastMessageFailed(organizationId, conversationId, i, CIRCUIT_BREAKER_REASON);
         this.emitCategorizedFailure(organizationId, conversationId, contact, CIRCUIT_BREAKER_REASON);
         failed++;
@@ -406,7 +407,7 @@ export class BroadcastService {
       }
 
       if (isSandbox && !contact.isSandboxAuthorized) {
-        await this.logBroadcast(organizationId, userId, runId, conversationId, type, 'failed', 'Número no autorizado en Meta (sandbox)');
+        await this.logBroadcast(organizationId, userId, runId, conversationId, type, 'failed', 'Número no autorizado en Meta (sandbox)', undefined, params.title);
         this.gateway.emitBroadcastMessageFailed(
           organizationId,
           conversationId,
@@ -421,7 +422,7 @@ export class BroadcastService {
 
       if (type === 'manual' || type === 'ia' || (type === 'template' && !isMetaTemplate)) {
         if (!contact.canSend) {
-          await this.logBroadcast(organizationId, userId, runId, conversationId, type, 'failed', 'Fuera de ventana de 24 horas');
+          await this.logBroadcast(organizationId, userId, runId, conversationId, type, 'failed', 'Fuera de ventana de 24 horas', undefined, params.title);
           this.gateway.emitBroadcastMessageFailed(organizationId, conversationId, i, 'Fuera de ventana de 24 horas');
           this.emitCategorizedFailure(organizationId, conversationId, contact, 'Fuera de ventana de 24 horas');
           failed++;
@@ -482,12 +483,12 @@ export class BroadcastService {
           });
           sentMessageId = msg.id;
         }
-        await this.logBroadcast(organizationId, userId, runId, conversationId, type, 'sent', undefined, sentMessageId);
+        await this.logBroadcast(organizationId, userId, runId, conversationId, type, 'sent', undefined, sentMessageId, params.title);
         this.gateway.emitBroadcastMessageSent(organizationId, conversationId, i);
         sent++;
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        await this.logBroadcast(organizationId, userId, runId, conversationId, type, 'failed', errorMessage);
+        await this.logBroadcast(organizationId, userId, runId, conversationId, type, 'failed', errorMessage, undefined, params.title);
         this.gateway.emitBroadcastMessageFailed(organizationId, conversationId, i, errorMessage);
         this.emitCategorizedFailure(organizationId, conversationId, contact, errorMessage);
         failed++;
@@ -778,15 +779,18 @@ export class BroadcastService {
   /** Un envío masivo completo (un click de "Lanzar Masivos") = un runId, agregando enviados/fallidos. */
   async getBroadcastRuns(
     organizationId: string,
-  ): Promise<Array<{ runId: string; type: string; startedAt: string; sent: number; failed: number }>> {
+  ): Promise<Array<{ runId: string; type: string; title: string | null; startedAt: string; sent: number; failed: number }>> {
     const grouped = await this.prisma.broadcastLog.groupBy({
-      by: ['runId', 'type', 'status'],
+      by: ['runId', 'type', 'title', 'status'],
       where: { organizationId, runId: { not: null } },
       _count: { _all: true },
       _min: { createdAt: true },
     });
 
-    const runs = new Map<string, { runId: string; type: string; startedAt: Date; sent: number; failed: number }>();
+    const runs = new Map<
+      string,
+      { runId: string; type: string; title: string | null; startedAt: Date; sent: number; failed: number }
+    >();
     for (const g of grouped) {
       const runId = g.runId!;
       const existing = runs.get(runId);
@@ -795,6 +799,7 @@ export class BroadcastService {
         runs.set(runId, {
           runId,
           type: g.type,
+          title: g.title,
           startedAt,
           sent: g.status === 'sent' ? g._count._all : 0,
           failed: g.status === 'failed' ? g._count._all : 0,
@@ -803,6 +808,7 @@ export class BroadcastService {
         if (g.status === 'sent') existing.sent += g._count._all;
         if (g.status === 'failed') existing.failed += g._count._all;
         if (startedAt < existing.startedAt) existing.startedAt = startedAt;
+        if (!existing.title && g.title) existing.title = g.title;
       }
     }
 
@@ -812,13 +818,13 @@ export class BroadcastService {
       .map((r) => ({ ...r, startedAt: r.startedAt.toISOString() }));
   }
 
-  /** Contactos de un envío masivo puntual, divididos en enviados o fallidos. */
+  /** Contactos de un envío masivo puntual, paginados por cursor (opcionalmente filtrados por estado/categoría). */
   async getBroadcastRunContacts(
     organizationId: string,
     runId: string,
-    split: 'sent' | 'failed',
-  ): Promise<
-    Array<{
+    options: { cursor?: string; limit?: number; status?: 'sent' | 'failed'; category?: string } = {},
+  ): Promise<{
+    contacts: Array<{
       name: string | null;
       phone: string;
       status: string;
@@ -826,13 +832,27 @@ export class BroadcastService {
       failureLabel: string | null;
       errorMessage: string | null;
       createdAt: string;
-    }>
-  > {
+    }>;
+    nextCursor: string | null;
+  }> {
+    const take = options.limit && options.limit > 0 ? Math.min(options.limit, 200) : 10;
     const logs = await this.prisma.broadcastLog.findMany({
-      where: { organizationId, runId, status: split },
-      orderBy: { createdAt: 'asc' },
+      where: {
+        organizationId,
+        runId,
+        status: options.status,
+        failureCategory: options.category,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: take + 1,
+      ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
     });
-    if (!logs.length) return [];
+
+    let nextCursor: string | null = null;
+    if (logs.length > take) {
+      nextCursor = logs.pop()!.id;
+    }
+    if (!logs.length) return { contacts: [], nextCursor: null };
 
     const conversations = await this.prisma.conversation.findMany({
       where: { id: { in: logs.map((l) => l.conversationId) } },
@@ -840,7 +860,7 @@ export class BroadcastService {
     });
     const contactByConversation = new Map(conversations.map((c) => [c.id, c.contact]));
 
-    return logs.map((l) => {
+    const contacts = logs.map((l) => {
       const contact = contactByConversation.get(l.conversationId);
       const category = l.failureCategory as BroadcastFailureCategory | null;
       return {
@@ -853,6 +873,8 @@ export class BroadcastService {
         createdAt: l.createdAt.toISOString(),
       };
     });
+
+    return { contacts, nextCursor };
   }
 
   private async logBroadcast(
@@ -864,6 +886,7 @@ export class BroadcastService {
     status: 'sent' | 'failed',
     errorMessage?: string,
     messageId?: string,
+    title?: string,
   ): Promise<void> {
     const failureCategory =
       status === 'failed' ? classifyWhatsAppFailure({ message: errorMessage }).category : null;
@@ -878,6 +901,7 @@ export class BroadcastService {
         errorMessage: status === 'failed' ? errorMessage : null,
         messageId,
         failureCategory,
+        title: title?.trim() || null,
       },
     });
   }

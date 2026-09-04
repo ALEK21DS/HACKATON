@@ -18,6 +18,8 @@ import {
   uploadBroadcastTemplateMedia,
   getBroadcastTemplateMedia,
   getSettings,
+  getBroadcastRuns,
+  getBroadcastRunContacts,
   type BroadcastListPreview,
   type BroadcastContact,
   type BroadcastTemplate,
@@ -26,6 +28,8 @@ import {
   type Campaign,
   type ImportExcelContactsResult,
   type SettingsData,
+  type BroadcastRun,
+  type BroadcastRunContact,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
@@ -38,16 +42,6 @@ function PersonIcon({ style }: { style?: React.CSSProperties }) {
   return (
     <svg style={{ width: '1.2rem', height: '1.2rem', ...style }} viewBox="0 0 24 24" fill="currentColor">
       <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-    </svg>
-  );
-}
-
-function BroadcastIcon({ style }: { style?: React.CSSProperties }) {
-  return (
-    <svg style={{ width: '1.2rem', height: '1.2rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M11 5L6 9H2V15H6L11 19V5Z" />
-      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
     </svg>
   );
 }
@@ -66,6 +60,47 @@ function SparklesIcon({ style }: { style?: React.CSSProperties }) {
       <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
     </svg>
   );
+}
+
+function AuditIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '1.2rem', height: '1.2rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="4" width="14" height="17" rx="2" />
+      <path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1" />
+      <path d="m9 13 2 2 4-4" />
+    </svg>
+  );
+}
+
+function BackIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '1rem', height: '1rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M19 12H5" /><path d="m12 19-7-7 7-7" />
+    </svg>
+  );
+}
+
+const RUN_TYPE_LABELS: Record<string, string> = {
+  manual: 'Texto Libre',
+  template: 'Plantilla',
+  ia: 'Asistente IA',
+};
+
+const RUN_REASON_FILTERS: Array<{ status?: 'sent' | 'failed'; category?: string; label: string }> = [
+  { status: undefined, category: undefined, label: 'Todos' },
+  { status: 'sent', category: undefined, label: 'Enviados' },
+  { status: 'failed', category: 'SPAM_BLOCKED', label: 'Spam' },
+  { status: 'failed', category: 'META_EXPERIMENT', label: 'Experimento' },
+  { status: 'failed', category: 'NO_WHATSAPP', label: 'Sin WhatsApp' },
+  { status: 'failed', category: 'OUT_OF_WINDOW', label: 'Fuera de ventana' },
+  { status: 'failed', category: 'SANDBOX_BLOCKED', label: 'Sandbox' },
+  { status: 'failed', category: 'OTHER', label: 'Otro' },
+];
+
+function formatRunDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('es-ES', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
 }
 
 function renderTemplatePreviewNodes(
@@ -132,6 +167,7 @@ export default function BroadcastPage() {
   const [excelError, setExcelError] = useState('');
   const excelFileInputRef = useRef<HTMLInputElement>(null);
   const [dailyUsage, setDailyUsage] = useState<SettingsData | null>(null);
+  const [broadcastTitle, setBroadcastTitle] = useState('');
   const [text, setText] = useState('');
   const [templateId, setTemplateId] = useState('');
   const [templateVars, setTemplateVars] = useState<Record<string, string>>({});
@@ -280,6 +316,99 @@ export default function BroadcastPage() {
     }
   }
 
+  // ── Auditoría de masivos enviados (columnas 2/3 en modo "audit") ──
+  const [viewMode, setViewMode] = useState<'compose' | 'audit'>('compose');
+  const [auditRuns, setAuditRuns] = useState<BroadcastRun[]>([]);
+  const [loadingRuns, setLoadingRuns] = useState(false);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [runContacts, setRunContacts] = useState<BroadcastRunContact[]>([]);
+  const [runContactsNextCursor, setRunContactsNextCursor] = useState<string | null>(null);
+  const [loadingRunContacts, setLoadingRunContacts] = useState(false);
+  const [loadingMoreRunContacts, setLoadingMoreRunContacts] = useState(false);
+  const [runContactsStatus, setRunContactsStatus] = useState<'sent' | 'failed' | undefined>(undefined);
+  const [runContactsCategory, setRunContactsCategory] = useState<string | undefined>(undefined);
+  const [exportingRun, setExportingRun] = useState(false);
+
+  const selectedRun = auditRuns.find(r => r.runId === selectedRunId) || null;
+
+  const openAudit = () => {
+    setViewMode('audit');
+    setSelectedRunId(null);
+    setRunContacts([]);
+    setLoadingRuns(true);
+    getBroadcastRuns().then(setAuditRuns).catch(() => setAuditRuns([])).finally(() => setLoadingRuns(false));
+  };
+
+  const closeAudit = () => {
+    setViewMode('compose');
+    setSelectedRunId(null);
+  };
+
+  const loadRunContacts = useCallback((runId: string, status?: 'sent' | 'failed', category?: string) => {
+    setLoadingRunContacts(true);
+    setRunContacts([]);
+    setRunContactsNextCursor(null);
+    getBroadcastRunContacts(runId, { status, category })
+      .then(({ contacts, nextCursor }) => { setRunContacts(contacts); setRunContactsNextCursor(nextCursor); })
+      .catch(() => { setRunContacts([]); setRunContactsNextCursor(null); })
+      .finally(() => setLoadingRunContacts(false));
+  }, []);
+
+  const loadMoreRunContacts = useCallback(() => {
+    if (!selectedRunId || !runContactsNextCursor || loadingMoreRunContacts) return;
+    setLoadingMoreRunContacts(true);
+    getBroadcastRunContacts(selectedRunId, { cursor: runContactsNextCursor, status: runContactsStatus, category: runContactsCategory })
+      .then(({ contacts, nextCursor }) => { setRunContacts(prev => [...prev, ...contacts]); setRunContactsNextCursor(nextCursor); })
+      .catch(() => {})
+      .finally(() => setLoadingMoreRunContacts(false));
+  }, [selectedRunId, runContactsNextCursor, loadingMoreRunContacts, runContactsStatus, runContactsCategory]);
+
+  function handleRunContactsScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 150) loadMoreRunContacts();
+  }
+
+  const selectRun = (runId: string) => {
+    setSelectedRunId(runId);
+    setRunContactsStatus(undefined);
+    setRunContactsCategory(undefined);
+    loadRunContacts(runId, undefined, undefined);
+  };
+
+  const changeRunFilter = (status?: 'sent' | 'failed', category?: string) => {
+    setRunContactsStatus(status);
+    setRunContactsCategory(category);
+    if (selectedRunId) loadRunContacts(selectedRunId, status, category);
+  };
+
+  const handleExportRun = async () => {
+    if (!selectedRunId || !selectedRun) return;
+    setExportingRun(true);
+    try {
+      const { contacts: allContacts } = await getBroadcastRunContacts(selectedRunId, {
+        limit: 5000,
+        status: runContactsStatus,
+        category: runContactsCategory,
+      });
+      const XLSX = await import('xlsx');
+      const header = ['Fecha y hora', 'Nombre', 'Número', 'Estado'];
+      const rows = allContacts.map((c) => [
+        formatRunDate(c.createdAt),
+        c.name || '(sin nombre)',
+        c.phone,
+        c.status === 'sent' ? 'Enviado' : (c.failureLabel || 'Fallido'),
+      ]);
+      const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+      ws['!cols'] = [{ wch: 20 }, { wch: 28 }, { wch: 16 }, { wch: 22 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Masivo');
+      const safeName = (selectedRun.title || selectedRun.runId.slice(0, 8)).replace(/[^a-z0-9]+/gi, '_').slice(0, 40);
+      XLSX.writeFile(wb, `masivo_${safeName}.xlsx`);
+    } finally {
+      setExportingRun(false);
+    }
+  };
+
   const refreshListPreview = useCallback(async (listIds: string[]) => {
     if (!listIds.length) {
       setListPreview(null);
@@ -422,6 +551,7 @@ export default function BroadcastPage() {
       const result = await startBroadcastSend({
         conversationIds: Array.from(selectedIds),
         type: messageType,
+        title: broadcastTitle.trim() || undefined,
         text: messageType !== 'template' ? (generatedText || text) : undefined,
         templateId: messageType === 'template' ? templateId : undefined,
         templateVariables: messageType === 'template' ? templateVars : undefined,
@@ -433,6 +563,7 @@ export default function BroadcastPage() {
       });
       if (!(result.sent === 0 && result.failed > 0)) {
         setSelectedIds(new Set());
+        setBroadcastTitle('');
         setText(''); setInstruction(''); setGeneratedText('');
         setTemplateVarModes({});
         setTemplateHeaderValue(''); setTemplateHeaderFileName(''); setTemplateHeaderPreviewUrl(''); setTemplateButtonVars({});
@@ -589,14 +720,61 @@ export default function BroadcastPage() {
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
 
-      {/* ── Sidebar: Audiencia ── */}
+      {/* ── Sidebar: Audiencia / Auditoría ── */}
+      {viewMode === 'audit' ? (
+        <aside className={`aside-sidebar${sidebarOpen ? ' open' : ''}`}>
+          <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <button
+              onClick={closeAudit}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'none', border: 'none', color: '#8C8C8C', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', padding: 0, marginBottom: '1rem' }}
+            >
+              <BackIcon /> Volver
+            </button>
+            <h2 style={{ fontSize: '1.3rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em' }}>Auditoría</h2>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }} className="custom-scrollbar">
+            {loadingRuns ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem 0' }}><Spinner /></div>
+            ) : auditRuns.length === 0 ? (
+              <div style={{ padding: '2rem 1rem', textAlign: 'center', color: '#444', fontSize: '0.8rem' }}>Todavía no hay masivos enviados.</div>
+            ) : auditRuns.map((run) => {
+              const isSelected = run.runId === selectedRunId;
+              return (
+                <div
+                  key={run.runId}
+                  onClick={() => selectRun(run.runId)}
+                  style={{
+                    padding: '1rem', borderRadius: '16px', cursor: 'pointer', marginBottom: '0.25rem',
+                    background: isSelected ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
+                    border: isSelected ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid transparent',
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#F2F2F2' }}>
+                    {run.title || RUN_TYPE_LABELS[run.type] || run.type}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.2rem' }}>{formatRunDate(run.startedAt)}</div>
+                  <div style={{ fontSize: '0.7rem', marginTop: '0.35rem' }}>
+                    <span style={{ color: '#4ADE80', fontWeight: 700 }}>{run.sent} enviados</span>
+                    {run.failed > 0 && <span style={{ color: '#EF4444', fontWeight: 700, marginLeft: '0.6rem' }}>{run.failed} fallidos</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+      ) : (
       <aside className={`aside-sidebar${sidebarOpen ? ' open' : ''}`}>
         <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
             <h2 style={{ fontSize: '1.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em' }}>Masivos</h2>
-            <div style={{ padding: '0.4rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', color: '#EF4444' }}>
-              <BroadcastIcon />
-            </div>
+            <button
+              onClick={openAudit}
+              style={{ padding: '0.4rem', background: 'rgba(239, 68, 68, 0.1)', border: 'none', borderRadius: '8px', color: '#EF4444', cursor: 'pointer', display: 'flex' }}
+              aria-label="Ver auditoría de masivos"
+              title="Auditoría"
+            >
+              <AuditIcon />
+            </button>
           </div>
           <div style={{ position: 'relative', marginBottom: '1rem' }}>
             <SearchIcon style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#444' }} />
@@ -934,6 +1112,7 @@ export default function BroadcastPage() {
           )}
         </div>
       </aside>
+      )}
 
       {/* ── Main: Consola de Lanzamiento ── */}
       <main className="page-main custom-scrollbar">
@@ -950,18 +1129,17 @@ export default function BroadcastPage() {
                   <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
                 </svg>
               </button>
-              <h1 style={{ fontSize: '2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', marginBottom: '0.5rem' }}>Lanzamiento Masivo</h1>
+              <h1 style={{ fontSize: '2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', marginBottom: '0.5rem' }}>
+                {viewMode === 'audit' ? (selectedRun ? (selectedRun.title || RUN_TYPE_LABELS[selectedRun.type] || selectedRun.type) : 'Auditoría de Envíos') : 'Lanzamiento Masivo'}
+              </h1>
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-              <a href="/broadcast" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#EF4444', textTransform: 'uppercase', textDecoration: 'none' }}>Campañas</a>
-              <a href="/templates" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#666', textTransform: 'uppercase', textDecoration: 'none' }}>Templates</a>
-              <a href="/broadcast/crm-lists" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#666', textTransform: 'uppercase', textDecoration: 'none' }}>Listas CRM</a>
-              <a href="/broadcast/sent" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#666', textTransform: 'uppercase', textDecoration: 'none' }}>Enviados</a>
-              <a href="/broadcast/audit" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#666', textTransform: 'uppercase', textDecoration: 'none' }}>Auditoría</a>
-            </div>
-            <p style={{ color: '#666', fontSize: '0.95rem' }}>Configura y dispara campañas masivas de alta tasa de apertura.</p>
+            <p style={{ color: '#666', fontSize: '0.95rem' }}>
+              {viewMode === 'audit'
+                ? (selectedRun ? formatRunDate(selectedRun.startedAt) : 'Seleccioná un masivo de la lista para ver el detalle de cada envío.')
+                : 'Configura y dispara campañas masivas de alta tasa de apertura.'}
+            </p>
 
-            {dailyUsage?.dailyLimit != null && (
+            {viewMode === 'compose' && dailyUsage?.dailyLimit != null && (
               <div style={{
                 marginTop: '1.25rem',
                 padding: '0.9rem 1.25rem',
@@ -982,6 +1160,23 @@ export default function BroadcastPage() {
               </div>
             )}
           </header>
+
+          {viewMode === 'compose' ? (
+          <>
+          {/* Título del masivo (interno, no se envía a WhatsApp) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
+            <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Título del masivo (interno, solo para auditoría)
+            </label>
+            <input
+              type="text"
+              value={broadcastTitle}
+              onChange={(e) => setBroadcastTitle(e.target.value)}
+              placeholder="Ej: Promo de fin de mes"
+              maxLength={120}
+              style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '0.85rem 1rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
+            />
+          </div>
 
           {/* Selector de Tipo de Mensaje */}
           <div style={{ background: '#080808', borderRadius: '20px', padding: '0.5rem', display: 'flex', gap: '0.5rem', marginBottom: forceMetaTemplate ? '0.75rem' : '2.5rem', border: '1px solid rgba(255,255,255,0.05)' }}>
@@ -1280,6 +1475,94 @@ export default function BroadcastPage() {
               </p>
             )}
           </div>
+          </>
+          ) : !selectedRunId ? (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.3, minHeight: '60vh' }}>
+              <Image src="/assets/images/NOIRLINE2.png" alt="Nextline" width={120} height={120} style={{ filter: 'grayscale(1)', marginBottom: '2rem' }} />
+              <p style={{ fontSize: '0.9rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.2em' }}>Selecciona un masivo</p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={handleExportRun}
+                  disabled={exportingRun || runContacts.length === 0}
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: runContacts.length === 0 ? '#444' : '#8C8C8C', padding: '0.6rem 1.1rem', borderRadius: 10, fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', cursor: runContacts.length === 0 ? 'not-allowed' : 'pointer' }}
+                >
+                  {exportingRun ? 'Exportando...' : 'Exportar Excel'}
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                {RUN_REASON_FILTERS.map((f) => {
+                  const active = runContactsStatus === f.status && runContactsCategory === f.category;
+                  return (
+                    <button
+                      key={f.label}
+                      onClick={() => changeRunFilter(f.status, f.category)}
+                      style={{
+                        padding: '0.4rem 0.8rem', borderRadius: 8,
+                        background: active ? '#EF4444' : 'rgba(255,255,255,0.03)',
+                        border: active ? 'none' : '1px solid rgba(255,255,255,0.05)',
+                        color: active ? 'white' : '#8C8C8C',
+                        fontSize: '0.65rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.03em',
+                        cursor: 'pointer', whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div
+                className="custom-scrollbar"
+                onScroll={handleRunContactsScroll}
+                style={{ border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, maxHeight: '58vh', overflowY: 'auto' }}
+              >
+                {loadingRunContacts ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem 0' }}><Spinner /></div>
+                ) : runContacts.length === 0 ? (
+                  <div style={{ padding: '3rem', textAlign: 'center', color: '#444' }}>Sin contactos en esta categoría.</div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.8rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <th style={{ padding: '0.75rem 1rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', fontSize: '0.65rem' }}>Fecha y hora</th>
+                        <th style={{ padding: '0.75rem 1rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', fontSize: '0.65rem' }}>Contacto</th>
+                        <th style={{ padding: '0.75rem 1rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', fontSize: '0.65rem' }}>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {runContacts.map((c, i) => (
+                        <tr key={`${c.phone}-${i}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                          <td style={{ padding: '0.75rem 1rem', color: '#8C8C8C', fontSize: '0.75rem' }}>{formatRunDate(c.createdAt)}</td>
+                          <td style={{ padding: '0.75rem 1rem' }}>
+                            <div style={{ fontWeight: 700, color: '#F2F2F2' }}>{c.name || '(sin nombre)'}</div>
+                            <div style={{ color: '#666', fontSize: '0.72rem' }}>{c.phone}</div>
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem' }}>
+                            <span style={{
+                              fontSize: '0.62rem', fontWeight: 800, padding: '0.2rem 0.6rem', borderRadius: 6,
+                              background: c.status === 'sent' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.1)',
+                              color: c.status === 'sent' ? '#4ADE80' : '#EF4444',
+                            }}>
+                              {c.status === 'sent' ? 'Enviado' : (c.failureLabel || 'Fallido')}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {loadingMoreRunContacts && (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: '1rem 0' }}>
+                    <Spinner size={18} />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </main>
 

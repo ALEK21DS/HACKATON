@@ -30,6 +30,7 @@ interface SendBroadcastParams {
   conversationIds: string[];
   type: BroadcastMessageType;
   text?: string;
+  title?: string;
   templateId?: string;
   templateVariables?: Record<string, string>;
   templateAutoNameVariables?: string[];
